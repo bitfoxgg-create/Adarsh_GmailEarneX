@@ -7,7 +7,7 @@ from flask import Flask
 import asyncpg
 from aiogram import Bot, Dispatcher, F
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandObject, ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER, StateFilter
+from aiogram.filters import Command, CommandStart, CommandObject, ChatMemberUpdatedFilter, IS_MEMBER, IS_NOT_MEMBER, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -361,6 +361,23 @@ def get_admin_menu_keyboard():
     kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
+def get_unassign_inline_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="👤 User ID", 
+        callback_data="unassign_by_user_id", 
+        icon_custom_emoji_id="5870458774455587120",
+        style="primary"
+    )
+    kb.button(
+        text="👥 All Users", 
+        callback_data="unassign_all_users", 
+        icon_custom_emoji_id="5274099962655816924",
+        style="danger"
+    )
+    kb.adjust(2)
+    return kb.as_markup()
+
 def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
     kb = InlineKeyboardBuilder()
     upi_link_text = "Change UPI" if upi_set else "Link UPI"
@@ -484,14 +501,20 @@ async def global_callback_middleware(handler, event: CallbackQuery, data):
         return await handler(event, data)
         
     if await is_banned(user_id):
-        await event.answer("🚫 You are banned from using this bot.", show_alert=True)
+        try:
+            await event.answer("🚫 You are banned from using this bot.", show_alert=True)
+        except Exception:
+            pass
         return
 
     if event.data == "check_must_join":
         return await handler(event, data)
 
     if MUST_JOIN_CHANNEL and not await check_user_joined_channel(user_id):
-        await event.answer("⚠️ You must join our channel first to use the bot!", show_alert=True)
+        try:
+            await event.answer("⚠️ You must join our channel first to use the bot!", show_alert=True)
+        except Exception:
+            pass
         return
 
     return await handler(event, data)
@@ -510,7 +533,10 @@ async def verify_must_join_callback(call: CallbackQuery):
             reply_markup=get_main_menu_keyboard()
         )
     else:
-        await call.answer("❌ You haven't joined the channel yet! Please join and try again.", show_alert=True)
+        try:
+            await call.answer("❌ You haven't joined the channel yet! Please join and try again.", show_alert=True)
+        except Exception:
+            pass
 
 @dp.chat_member(ChatMemberUpdatedFilter(IS_MEMBER >> IS_NOT_MEMBER))
 async def user_left_channel(event: ChatMemberUpdated):
@@ -529,31 +555,35 @@ async def user_left_channel(event: ChatMemberUpdated):
 # START & GLOBAL CANCEL
 # ============================================
 
+@dp.message(CommandStart(), StateFilter("*"))
 @dp.message(Command("start"), StateFilter("*"))
-async def start(message: Message, command: CommandObject, state: FSMContext):
-    data = await state.get_data()
-    last_msg_id = data.get("last_menu_msg_id")
-    if last_msg_id:
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=last_msg_id)
-        except Exception:
-            pass
+async def start(message: Message, state: FSMContext, command: CommandObject = None):
+    try:
+        data = await state.get_data()
+        last_msg_id = data.get("last_menu_msg_id")
+        if last_msg_id:
+            try:
+                await bot.delete_message(chat_id=message.chat.id, message_id=last_msg_id)
+            except Exception:
+                pass
 
-    await state.clear()
-    
-    referrer_id = None
-    if command.args and command.args.isdigit():
-        referrer_id = int(command.args)
+        await state.clear()
+        
+        referrer_id = None
+        if command and command.args and command.args.isdigit():
+            referrer_id = int(command.args)
 
-    await ensure_user(message.from_user.id, referrer_id)
-    
-    text = (
-        '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome back.</b>\n\n'
-        'Choose an option from the menu below:'
-    )
-    
-    sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
-    await state.update_data(last_menu_msg_id=sent_msg.message_id)
+        await ensure_user(message.from_user.id, referrer_id)
+        
+        text = (
+            '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome back.</b>\n\n'
+            'Choose an option from the menu below:'
+        )
+        
+        sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+        await state.update_data(last_menu_msg_id=sent_msg.message_id)
+    except Exception as e:
+        print(f"Error in start command: {e}")
 
 @dp.message(Command("cancel"), StateFilter("*"))
 @dp.message(F.text == "🚫 Cancel", StateFilter("*"))
@@ -586,7 +616,10 @@ async def cb_menu_back(call: CallbackQuery, state: FSMContext):
         await state.update_data(last_menu_msg_id=sent_msg.message_id)
     else:
         await state.update_data(last_menu_msg_id=call.message.message_id)
-    await call.answer()
+    try:
+        await call.answer()
+    except Exception:
+        pass
 
 @dp.callback_query(F.data == "menu_referrals")
 async def cb_referrals(call: CallbackQuery, state: FSMContext):
@@ -636,7 +669,10 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
     except:
         await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     await state.update_data(last_menu_msg_id=call.message.message_id)
-    await call.answer()
+    try:
+        await call.answer()
+    except Exception:
+        pass
 
 @dp.callback_query(F.data == "menu_settings")
 async def cb_settings(call: CallbackQuery, state: FSMContext):
@@ -654,7 +690,10 @@ async def cb_settings(call: CallbackQuery, state: FSMContext):
     except:
         await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_settings_keyboard(notif, curr))
     await state.update_data(last_menu_msg_id=call.message.message_id)
-    await call.answer()
+    try:
+        await call.answer()
+    except Exception:
+        pass
 
 @dp.callback_query(F.data == "toggle_notif")
 async def cb_toggle_notif(call: CallbackQuery):
@@ -666,7 +705,10 @@ async def cb_toggle_notif(call: CallbackQuery):
         await conn.execute("UPDATE users SET notifications_enabled=$1 WHERE user_id=$2", new_notif, call.from_user.id)
         
     status_str = "ENABLED" if new_notif else "DISABLED"
-    await call.answer(f"Notifications are now {status_str}", show_alert=True)
+    try:
+        await call.answer(f"Notifications are now {status_str}", show_alert=True)
+    except Exception:
+        pass
     
     try:
         await call.message.edit_reply_markup(reply_markup=get_settings_keyboard(new_notif, user_data['currency']))
@@ -683,7 +725,10 @@ async def cb_toggle_currency(call: CallbackQuery):
         await conn.execute("UPDATE users SET currency=$1 WHERE user_id=$2", new_curr, call.from_user.id)
         
     symbol = "$" if new_curr == "USD" else "₹"
-    await call.answer(f"Currency updated to {new_curr} ({symbol})", show_alert=True)
+    try:
+        await call.answer(f"Currency updated to {new_curr} ({symbol})", show_alert=True)
+    except Exception:
+        pass
     
     try:
         await call.message.edit_reply_markup(reply_markup=get_settings_keyboard(user_data['notifications_enabled'], new_curr))
@@ -717,7 +762,10 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
                 except:
                     await call.message.answer(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
                 await state.update_data(last_menu_msg_id=call.message.message_id)
-                await call.answer()
+                try:
+                    await call.answer()
+                except Exception:
+                    pass
                 return
 
             expire_time = assigned_time + timedelta(minutes=30)
@@ -750,7 +798,10 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
                 except:
                     await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
                 await state.update_data(last_menu_msg_id=call.message.message_id)
-                await call.answer()
+                try:
+                    await call.answer()
+                except Exception:
+                    pass
                 return
             else:
                 async with conn.transaction():
@@ -765,7 +816,10 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
             except:
                 await call.message.answer(txt, reply_markup=get_main_menu_keyboard())
             await state.update_data(last_menu_msg_id=call.message.message_id)
-            await call.answer()
+            try:
+                await call.answer()
+            except Exception:
+                pass
             return
         
         task_id = task['id']
@@ -797,7 +851,10 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
     except:
         await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
     await state.update_data(last_menu_msg_id=call.message.message_id)
-    await call.answer()
+    try:
+        await call.answer()
+    except Exception:
+        pass
 
 @dp.callback_query(F.data == "menu_balance")
 async def cb_balance(call: CallbackQuery, state: FSMContext):
@@ -824,7 +881,10 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
     except Exception:
         await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set))
     await state.update_data(last_menu_msg_id=call.message.message_id)
-    await call.answer()
+    try:
+        await call.answer()
+    except Exception:
+        pass
 
 @dp.callback_query(F.data == "menu_sell_gmail")
 async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
@@ -841,7 +901,10 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
     except:
         await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     await state.update_data(last_menu_msg_id=call.message.message_id)
-    await call.answer()
+    try:
+        await call.answer()
+    except Exception:
+        pass
 
 @dp.callback_query(F.data == "menu_history")
 async def cb_history(call: CallbackQuery, state: FSMContext):
@@ -858,7 +921,10 @@ async def cb_history(call: CallbackQuery, state: FSMContext):
         except:
             await call.message.answer(txt, reply_markup=get_back_inline_keyboard())
         await state.update_data(last_menu_msg_id=call.message.message_id)
-        await call.answer()
+        try:
+            await call.answer()
+        except Exception:
+            pass
         return
     text = '<tg-emoji emoji-id="5440410042773824003">📜</tg-emoji> <b>Last Transactions</b>\n\n'
     for r in rows:
@@ -871,7 +937,10 @@ async def cb_history(call: CallbackQuery, state: FSMContext):
     except:
         await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     await state.update_data(last_menu_msg_id=call.message.message_id)
-    await call.answer()
+    try:
+        await call.answer()
+    except Exception:
+        pass
 
 @dp.callback_query(F.data == "menu_support")
 async def cb_support(call: CallbackQuery, state: FSMContext):
@@ -886,7 +955,10 @@ async def cb_support(call: CallbackQuery, state: FSMContext):
     except:
         await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
     await state.update_data(last_menu_msg_id=call.message.message_id)
-    await call.answer()
+    try:
+        await call.answer()
+    except Exception:
+        pass
 
 # ============================================
 # SUPPORT SYSTEM
@@ -915,7 +987,7 @@ async def cancel_support_callback(call: CallbackQuery, state: FSMContext):
     await state.update_data(last_menu_msg_id=sent_msg.message_id)
     try:
         await call.answer()
-    except:
+    except Exception:
         pass
 
 @dp.message(UserState.waiting_for_support, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
@@ -1344,7 +1416,7 @@ async def start_unassign_user_id(call: CallbackQuery, state: FSMContext):
     await call.message.answer("👤 Send the numeric **User ID** whose task you want to unassign:", parse_mode=ParseMode.MARKDOWN)
     try:
         await call.answer()
-    except:
+    except Exception:
         pass
 
 @dp.callback_query(F.data == "unassign_all_users")
@@ -1360,7 +1432,7 @@ async def process_unassign_all_users(call: CallbackQuery):
         if not assigned_tasks:
             try:
                 await call.answer("📭 No active assigned tasks found to unassign!", show_alert=True)
-            except:
+            except Exception:
                 pass
             return
 
@@ -1373,7 +1445,7 @@ async def process_unassign_all_users(call: CallbackQuery):
     await edit_admin_message(call, "✅ <b>Successfully unassigned task(s) and returned them to the pool.</b>")
     try:
         await call.answer("Unassigned all tasks successfully!", show_alert=True)
-    except:
+    except Exception:
         pass
 
 @dp.message(F.text == "➕ Add Balance", StateFilter("*"))
@@ -1845,7 +1917,7 @@ async def process_remove_task_step(message: Message, state: FSMContext):
 async def start_link_upi(call: CallbackQuery, state: FSMContext):
     try:
         await call.answer()
-    except:
+    except Exception:
         pass
     await state.set_state(UserState.setting_upi)
     await call.message.answer('<tg-emoji emoji-id="5902449142575141204">🔡</tg-emoji> Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>', parse_mode=ParseMode.HTML)
@@ -1854,7 +1926,7 @@ async def start_link_upi(call: CallbackQuery, state: FSMContext):
 async def start_link_usdt(call: CallbackQuery, state: FSMContext):
     try:
         await call.answer()
-    except:
+    except Exception:
         pass
     await state.set_state(UserState.setting_usdt)
     await call.message.answer('<tg-emoji emoji-id="5902449142575141204">🪙</tg-emoji> Send your <b>USDT BEP-20</b> address below:\n\n<i>Example: 0x1234567890abcdef1234567890abcdef12345678</i>', parse_mode=ParseMode.HTML)
@@ -1879,7 +1951,7 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
     if upi == "None" or not upi:
         try:
             await call.answer("❌ Please link your UPI ID first before withdrawing via UPI!", show_alert=True)
-        except:
+        except Exception:
             pass
         return
 
@@ -1889,7 +1961,7 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
         bal_str = format_currency(bal, curr)
         try:
             await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
-        except:
+        except Exception:
             pass
         return
 
@@ -1901,7 +1973,7 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
         if existing_pending:
             try:
                 await call.answer("⚠️ You already have a pending withdrawal request! Please wait for it to be processed.", show_alert=True)
-            except:
+            except Exception:
                 pass
             return
 
@@ -1953,7 +2025,7 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
     if usdt == "None" or not usdt:
         try:
             await call.answer("❌ Please link your USDT BEP-20 address first before withdrawing!", show_alert=True)
-        except:
+        except Exception:
             pass
         return
 
@@ -1963,7 +2035,7 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
         bal_str = format_currency(bal, curr)
         try:
             await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
-        except:
+        except Exception:
             pass
         return
 
@@ -1975,7 +2047,7 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
         if existing_pending:
             try:
                 await call.answer("⚠️ You already have a pending withdrawal request! Please wait for it to be processed.", show_alert=True)
-            except:
+            except Exception:
                 pass
             return
 
@@ -2026,13 +2098,13 @@ async def inline_submit_task(call: CallbackQuery, state: FSMContext):
     if not row:
         try:
             await call.answer('❌ You do not have any active task.', show_alert=True)
-        except:
+        except Exception:
             pass
         return
     if row['status'] == 'pending_review':
         try:
             await call.answer('⏳ You have already submitted this task.', show_alert=True)
-        except:
+        except Exception:
             pass
         return
         
@@ -2045,7 +2117,7 @@ async def inline_submit_task(call: CallbackQuery, state: FSMContext):
     await call.message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Send screenshot or proof of completed task.', parse_mode=ParseMode.HTML)
     try:
         await call.answer()
-    except:
+    except Exception:
         pass
 
 @dp.callback_query(F.data == "user_cancel_task")
@@ -2057,14 +2129,14 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
         if not row:
             try:
                 await call.answer("❌ You don't have any active task to cancel.", show_alert=True)
-            except:
+            except Exception:
                 pass
             return
         
         if row['status'] == 'pending_review':
             try:
                 await call.answer("❌ Cannot cancel a task already submitted for admin review.", show_alert=True)
-            except:
+            except Exception:
                 pass
             return
 
@@ -2076,7 +2148,7 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
     try:
         await call.message.edit_text(f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Task #{task_id} has been cancelled and returned to the pool.', parse_mode=ParseMode.HTML)
         await call.answer()
-    except:
+    except Exception:
         pass
 
 @dp.message(UserState.submitting_task, F.photo | F.text, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS) if F.text else True)
@@ -2116,18 +2188,21 @@ async def handle_task_submission(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("sellapprove_db:"))
 async def approve_sell_unified(call: CallbackQuery):
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
     _, sell_id_str, user_id_str, amount_str = call.data.split(":")
     sell_id = int(sell_id_str)
     user_id = int(user_id_str)
     amount = float(amount_str)
 
+    await ensure_user(user_id)
+
     async with db_pool.acquire() as conn:
         status = await conn.fetchval("SELECT status FROM pending_sells WHERE id=$1", sell_id)
         if status != 'pending_review':
-            try:
-                await call.answer("⚠️ This sell request has already been processed!", show_alert=True)
-            except:
-                pass
             return
 
         async with conn.transaction():
@@ -2138,6 +2213,7 @@ async def approve_sell_unified(call: CallbackQuery):
             # Referral commission check (Sell Gmail = ₹5.00 reward)
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
             if referred_by:
+                await ensure_user(referred_by)
                 ref_reward = 5.0
                 await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
                 await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
@@ -2156,17 +2232,20 @@ async def approve_sell_unified(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("selldecline_db:"))
 async def decline_sell_unified(call: CallbackQuery, state: FSMContext):
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
     _, sell_id_str, user_id_str = call.data.split(":")
     sell_id = int(sell_id_str)
     user_id = int(user_id_str)
 
+    await ensure_user(user_id)
+
     async with db_pool.acquire() as conn:
         status = await conn.fetchval("SELECT status FROM pending_sells WHERE id=$1", sell_id)
         if status != 'pending_review':
-            try:
-                await call.answer("⚠️ This sell request has already been processed!", show_alert=True)
-            except:
-                pass
             return
 
     await state.set_state(AdminState.waiting_for_sell_reject_reason)
@@ -2177,10 +2256,6 @@ async def decline_sell_unified(call: CallbackQuery, state: FSMContext):
         is_photo=bool(call.message.photo)
     )
     await call.message.answer('<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining this sell request:</b>', parse_mode=ParseMode.HTML)
-    try:
-        await call.answer()
-    except:
-        pass
 
 @dp.message(AdminState.waiting_for_sell_reject_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_reject_reason(message: Message, state: FSMContext):
@@ -2219,6 +2294,11 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("taskapprove:"))
 async def approve_task(call: CallbackQuery):
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
     _, task_id_str, callback_user_id, reward_str = call.data.split(":")
     task_id = int(task_id_str)
     reward = float(reward_str)
@@ -2226,14 +2306,12 @@ async def approve_task(call: CallbackQuery):
     async with db_pool.acquire() as conn:
         current_status = await conn.fetchval("SELECT status FROM tasks WHERE id=$1", task_id)
         if current_status != 'pending_review':
-            try:
-                await call.answer("⚠️ Task has already been processed!", show_alert=True)
-            except:
-                pass
             return
 
         assigned_user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
         user_id = assigned_user_id if assigned_user_id else int(callback_user_id)
+
+        await ensure_user(user_id)
 
         async with conn.transaction():
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", reward, user_id)
@@ -2244,6 +2322,7 @@ async def approve_task(call: CallbackQuery):
             # Referral commission check (Task Gmail = ₹7.00 reward)
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
             if referred_by:
+                await ensure_user(referred_by)
                 ref_reward = 7.0
                 await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
                 await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
@@ -2262,17 +2341,20 @@ async def approve_task(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("taskdecline:"))
 async def decline_task(call: CallbackQuery, state: FSMContext):
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
     _, task_id_str, user_id_str = call.data.split(":")
     task_id = int(task_id_str)
     user_id = int(user_id_str)
     
+    await ensure_user(user_id)
+
     async with db_pool.acquire() as conn:
         current_status = await conn.fetchval("SELECT status FROM tasks WHERE id=$1", task_id)
         if current_status != 'pending_review':
-            try:
-                await call.answer("⚠️ Task has already been processed!", show_alert=True)
-            except:
-                pass
             return
 
     await state.set_state(AdminState.waiting_for_task_reject_reason)
@@ -2283,10 +2365,6 @@ async def decline_task(call: CallbackQuery, state: FSMContext):
         is_photo=bool(call.message.photo)
     )
     await call.message.answer(f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining Task #{task_id}:</b>', parse_mode=ParseMode.HTML)
-    try:
-        await call.answer()
-    except:
-        pass
 
 @dp.message(AdminState.waiting_for_task_reject_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_task_reject_reason(message: Message, state: FSMContext):
@@ -2328,18 +2406,21 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("pay:"))
 async def pay_withdraw(call: CallbackQuery):
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
     _, withdrawal_id, user_id, amount = call.data.split(":")
     withdrawal_id = int(withdrawal_id)
     user_id = int(user_id)
     amount = float(amount)
     
+    await ensure_user(user_id)
+
     async with db_pool.acquire() as conn:
         status = await conn.fetchval("SELECT status FROM withdrawals WHERE id=$1", withdrawal_id)
         if status != 'pending':
-            try:
-                await call.answer("⚠️ This withdrawal request has already been processed!", show_alert=True)
-            except:
-                pass
             return
 
         async with conn.transaction():
@@ -2354,6 +2435,11 @@ async def pay_withdraw(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("reject:"))
 async def reject_withdraw(call: CallbackQuery):
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
     _, withdrawal_id, user_id = call.data.split(":")
     withdrawal_id = int(withdrawal_id)
     user_id = int(user_id)
@@ -2361,10 +2447,6 @@ async def reject_withdraw(call: CallbackQuery):
     async with db_pool.acquire() as conn:
         status = await conn.fetchval("SELECT status FROM withdrawals WHERE id=$1", withdrawal_id)
         if status != 'pending':
-            try:
-                await call.answer("⚠️ This withdrawal request has already been processed!", show_alert=True)
-            except:
-                pass
             return
 
         await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
