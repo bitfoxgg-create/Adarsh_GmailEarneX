@@ -213,18 +213,17 @@ async def load_settings_and_cache():
 
 async def ensure_user(user_id: int, referrer_id: int = None):
     async with db_pool.acquire() as conn:
-        if referrer_id and referrer_id != user_id:
-            ref_exists = await conn.fetchval("SELECT user_id FROM users WHERE user_id=$1", referrer_id)
-            if ref_exists:
-                await conn.execute(
-                    "INSERT INTO users (user_id, balance, upi, usdt_address, notifications_enabled, currency, referred_by) VALUES ($1, 0, 'None', 'None', TRUE, 'INR', $2) ON CONFLICT (user_id) DO NOTHING", 
-                    user_id, referrer_id
-                )
-                return
         await conn.execute(
             "INSERT INTO users (user_id, balance, upi, usdt_address, notifications_enabled, currency) VALUES ($1, 0, 'None', 'None', TRUE, 'INR') ON CONFLICT (user_id) DO NOTHING", 
             user_id
         )
+        if referrer_id and referrer_id != user_id:
+            ref_exists = await conn.fetchval("SELECT user_id FROM users WHERE user_id=$1", referrer_id)
+            if ref_exists:
+                await conn.execute(
+                    "UPDATE users SET referred_by = $1 WHERE user_id = $2 AND referred_by IS NULL",
+                    referrer_id, user_id
+                )
 
 async def get_user_data(user_id: int):
     await ensure_user(user_id)
@@ -612,6 +611,9 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
     formatted_earnings = format_currency(total_earnings, curr)
     invite_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
 
+    rate_2fa_usd = 2.89 / USD_TO_INR
+    rate_non2fa_usd = 0.96 / USD_TO_INR
+
     text = (
         f'<tg-emoji emoji-id="6183862417785626642">👥</tg-emoji> <b>My Referrals</b>\n'
         f'━━━━━━━━━━━━━━━━━━\n'
@@ -622,8 +624,8 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
         f'<tg-emoji emoji-id="5417831807720642261">ℹ️</tg-emoji> <b>How it works</b>\n'
         f'Share your invite link. Every time someone you invited gets a Gmail account accepted, you earn a cash referral reward — for a lifetime. No limit, it never expires.\n\n'
         f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Referral Rewards</b>\n'
-        f'2FA accepted account: ₹ 2.89\n'
-        f'Non-2FA accepted account: ₹ 0.96\n'
+        f'2FA accepted account: ₹ 2.89 (${rate_2fa_usd:.2f})\n'
+        f'Non-2FA accepted account: ₹ 0.96 (${rate_non2fa_usd:.2f})\n'
         f'Paid on every accepted account from your referrals — for life.\n\n'
         f'<tg-emoji emoji-id="5337080053119336309">🔗</tg-emoji> <b>Your invite link:</b>\n'
         f'<code>{invite_link}</code>'
@@ -2142,7 +2144,10 @@ async def approve_sell_unified(call: CallbackQuery):
                 
                 ref_user_data = await get_user_data(referred_by)
                 ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
-                await send_user_notification(referred_by, f"🎉 You earned a referral reward of {ref_amt_str} from an approved account!")
+                notif_text = (
+                    f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> sell gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
+                )
+                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
 
     await edit_admin_message(call, '✅ Sell Request Approved')
     user_data = await get_user_data(user_id)
@@ -2245,7 +2250,10 @@ async def approve_task(call: CallbackQuery):
                 
                 ref_user_data = await get_user_data(referred_by)
                 ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
-                await send_user_notification(referred_by, f"🎉 You earned a referral reward of {ref_amt_str} from an approved account!")
+                notif_text = (
+                    f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> task got approved and <b>{ref_amt_str}</b> credited to your balance!'
+                )
+                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
             
     await edit_admin_message(call, '✅ Task Approved')
     user_data = await get_user_data(user_id)
