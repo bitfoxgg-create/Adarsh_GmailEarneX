@@ -601,9 +601,9 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
         ) or 0
         
         approved_ref_accounts = await conn.fetchval('''
-            SELECT COUNT(*) FROM pending_sells ps
-            JOIN users u ON ps.user_id = u.user_id
-            WHERE u.referred_by = $1 AND ps.status = 'approved'
+            SELECT COUNT(*) FROM transactions t
+            JOIN users u ON t.user_id = u.user_id
+            WHERE u.referred_by = $1 AND t.type IN ('sell', 'task')
         ''', user_id) or 0
 
         total_earnings = user_data['referral_earnings'] if user_data else 0.0
@@ -611,8 +611,8 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
     formatted_earnings = format_currency(total_earnings, curr)
     invite_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
 
-    rate_2fa_usd = 2.89 / USD_TO_INR
-    rate_non2fa_usd = 0.96 / USD_TO_INR
+    rate_sell = format_currency(5.0, curr)
+    rate_task = format_currency(7.0, curr)
 
     text = (
         f'<tg-emoji emoji-id="6183862417785626642">👥</tg-emoji> <b>My Referrals</b>\n'
@@ -624,8 +624,8 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
         f'<tg-emoji emoji-id="5417831807720642261">ℹ️</tg-emoji> <b>How it works</b>\n'
         f'Share your invite link. Every time someone you invited gets a Gmail account accepted, you earn a cash referral reward — for a lifetime. No limit, it never expires.\n\n'
         f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Referral Rewards</b>\n'
-        f'2FA accepted account: ₹ 2.89 (${rate_2fa_usd:.2f})\n'
-        f'Non-2FA accepted account: ₹ 0.96 (${rate_non2fa_usd:.2f})\n'
+        f'Sell Gmail accepted account: {rate_sell}\n'
+        f'Task Gmail accepted account: {rate_task}\n'
         f'Paid on every accepted account from your referrals — for life.\n\n'
         f'<tg-emoji emoji-id="5337080053119336309">🔗</tg-emoji> <b>Your invite link:</b>\n'
         f'<code>{invite_link}</code>'
@@ -2135,10 +2135,10 @@ async def approve_sell_unified(call: CallbackQuery):
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, f"Gmail sell #{sell_id} approved")
             await conn.execute("UPDATE pending_sells SET status='approved' WHERE id=$1", sell_id)
 
-            # Referral commission check
+            # Referral commission check (Sell Gmail = ₹5.00 reward)
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
             if referred_by:
-                ref_reward = 2.89  # Default 2FA rate
+                ref_reward = 5.0
                 await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
                 await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
                 
@@ -2241,17 +2241,17 @@ async def approve_task(call: CallbackQuery):
             await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
             await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)
 
-            # Referral commission check
+            # Referral commission check (Task Gmail = ₹7.00 reward)
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
             if referred_by:
-                ref_reward = 2.89
+                ref_reward = 7.0
                 await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
                 await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
                 
                 ref_user_data = await get_user_data(referred_by)
                 ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
                 notif_text = (
-                    f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> task got approved and <b>{ref_amt_str}</b> credited to your balance!'
+                    f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> task gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
                 )
                 await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
             
