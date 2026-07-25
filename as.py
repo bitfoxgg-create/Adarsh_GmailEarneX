@@ -28,7 +28,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
 DATABASE_URL = os.environ.get('DATABASE_URL')
-START_PHOTO_PATH = os.environ.get('START_PHOTO_PATH', 'start.jpg')  # Save image as start.jpg or provide path/URL
+
+# You can set an environment variable or paste a direct image URL / Telegram file_id here:
+START_PHOTO = os.environ.get('START_PHOTO', 'https://ibb.co/HTyYH5JT')
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -362,7 +364,7 @@ def get_support_cancel_keyboard():
     return kb.as_markup()
 
 async def edit_or_send_text(call: CallbackQuery, text: str, reply_markup=None):
-    """Helper to update a message safely whether the previous message was text or photo."""
+    """Safely updates or replaces the message regardless of whether it was a photo or text."""
     if call.message.photo:
         try:
             await call.message.delete()
@@ -473,11 +475,7 @@ async def user_left_channel(event: ChatMemberUpdated):
 
 async def send_start_menu_photo(chat_id: int, caption_text: str, reply_markup):
     """Sends the start menu photo with caption."""
-    if os.path.exists(START_PHOTO_PATH):
-        photo = FSInputFile(START_PHOTO_PATH)
-    else:
-        photo = START_PHOTO_PATH  # Can be URL or File ID
-        
+    photo = FSInputFile(START_PHOTO) if os.path.exists(START_PHOTO) else START_PHOTO
     return await bot.send_photo(
         chat_id=chat_id,
         photo=photo,
@@ -507,7 +505,7 @@ async def start(message: Message, state: FSMContext):
     try:
         sent_msg = await send_start_menu_photo(message.chat.id, text, get_main_menu_keyboard())
     except Exception as e:
-        print(f"Failed to send start photo, sending text instead: {e}")
+        print(f"Error sending photo start menu: {e}")
         sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
         
     await state.update_data(last_menu_msg_id=sent_msg.message_id)
