@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime, timedelta
 import os
 from threading import Thread
+import urllib.parse
 from flask import Flask
 
 import asyncpg
@@ -16,6 +17,7 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    CopyTextButton,
     ChatMemberUpdated
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
@@ -323,12 +325,13 @@ def get_main_menu_keyboard():
 
 def get_referral_inline_keyboard(user_id: int):
     invite_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
-    share_url = f"https://t.me/share/url?url={invite_link}&text=Join%20Gmail%20Pay%20bot%20and%20start%20earning%20money!"
+    custom_share_text = "🚀Join Earnex Bot and Start Earning Money!✅"
+    share_url = f"https://t.me/share/url?url={urllib.parse.quote(invite_link)}&text={urllib.parse.quote(custom_share_text)}"
     
     kb = InlineKeyboardBuilder()
     kb.button(
         text="Copy link",
-        callback_data="copy_ref_link",
+        copy_text=CopyTextButton(text=invite_link),
         icon_custom_emoji_id="5271604874419647061",
         style="primary"
     )
@@ -696,15 +699,6 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
     await state.update_data(last_menu_msg_id=call.message.message_id)
     try:
         await call.answer()
-    except Exception:
-        pass
-
-@dp.callback_query(F.data == "copy_ref_link")
-async def cb_copy_ref_link(call: CallbackQuery):
-    user_id = call.from_user.id
-    invite_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
-    try:
-        await call.answer(f"Your invite link:\n{invite_link}", show_alert=True)
     except Exception:
         pass
 
