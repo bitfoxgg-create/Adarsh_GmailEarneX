@@ -638,8 +638,8 @@ async def start(message: Message, state: FSMContext, command: CommandObject = No
         if is_new_user:
             text = (
                 '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome to Gmail Pay Bot!</b>\n\n'
-                '💵 <b>Default Currency Selected:</b> <code>USD ($)</code>\n'
-                '⚙️ <i>You can change your currency anytime in <b>Settings</b>.</i>\n\n'
+                '<tg-emoji emoji-id="5902206159095339799">👋</tg-emoji> <b>Default Currency Selected:</b> <code>USD ($)</code>\n'
+                '<tg-emoji emoji-id="5413683612342034207">👋</tg-emoji> <i>You can change your currency anytime in <b>Settings</b>.</i>\n\n'
                 'Choose an option from the menu below:'
             )
         else:
