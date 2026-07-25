@@ -43,7 +43,7 @@ BOT_USERNAME = "Gmailpaybot"
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "👥 Referrals", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
     "➕ Add Task", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
-    "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
+    "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User", "🗑 Clear Data",
     "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel"
 }
@@ -84,6 +84,7 @@ class AdminState(StatesGroup):
     waiting_for_check_balance = State()
     waiting_for_ban_user = State()
     waiting_for_unban_user = State()
+    waiting_for_clear_data_user_id = State()
     waiting_for_add_task = State()
     waiting_for_update_rewards = State()
     waiting_for_remove_task = State()
@@ -351,6 +352,7 @@ def get_admin_menu_keyboard():
     kb.button(text="🏆 Top Balances", style="primary")
     kb.button(text="🚫 Ban User", style="danger")
     kb.button(text="✅ Unban User", style="success")
+    kb.button(text="🗑 Clear Data", style="danger")
     kb.button(text="📢 Broadcast", style="primary")
     kb.button(text="🏷 Update All Rewards", style="primary")
     kb.button(text="🗑 Remove Task", style="danger")
@@ -358,7 +360,7 @@ def get_admin_menu_keyboard():
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 3, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
@@ -1305,6 +1307,48 @@ async def admin_btn_pending_withdrawals(message: Message, state: FSMContext):
             reply_markup=kb,
             parse_mode=ParseMode.HTML
         )
+
+@dp.message(F.text == "🗑 Clear Data", StateFilter("*"))
+async def admin_btn_clear_data(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_clear_data_user_id)
+    await message.answer("🗑 <b>Clear User Data</b>\n\nSend the numeric **User ID** whose data you want to clear completely:", parse_mode=ParseMode.MARKDOWN)
+
+@dp.message(AdminState.waiting_for_clear_data_user_id, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_clear_data_step(message: Message, state: FSMContext):
+    try:
+        target_id = int(message.text.strip())
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                # Re-assign any active tasks back to pool
+                assigned_tasks = await conn.fetch("SELECT task_id FROM task_assignments WHERE user_id=$1", target_id)
+                if assigned_tasks:
+                    task_ids = [r['task_id'] for r in assigned_tasks]
+                    await conn.execute("DELETE FROM task_assignments WHERE user_id=$1", target_id)
+                    await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids)
+
+                # Wipe user-related records
+                await conn.execute("DELETE FROM transactions WHERE user_id=$1", target_id)
+                await conn.execute("DELETE FROM withdrawals WHERE user_id=$1", target_id)
+                await conn.execute("DELETE FROM pending_sells WHERE user_id=$1", target_id)
+                await conn.execute("DELETE FROM banned_users WHERE user_id=$1", target_id)
+                
+                # Unlink referrals where target was the referrer
+                await conn.execute("UPDATE users SET referred_by=NULL WHERE referred_by=$1", target_id)
+                
+                # Delete user record
+                await conn.execute("DELETE FROM users WHERE user_id=$1", target_id)
+
+        BANNED_USERS_CACHE.discard(target_id)
+        
+        await message.answer(f"✅ **Successfully cleared all data for User `{target_id}`!**\nThey will be treated as a new user upon next start.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+    except ValueError:
+        await message.answer("❌ Invalid User ID. Please enter a valid numeric User ID.", parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await message.answer(f"❌ Error clearing data: `{e}`", parse_mode=ParseMode.MARKDOWN)
+
+    await state.clear()
 
 @dp.message(F.text == "💬 Chat", StateFilter("*"))
 async def admin_btn_chat(message: Message, state: FSMContext):
