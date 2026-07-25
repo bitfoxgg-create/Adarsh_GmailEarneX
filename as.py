@@ -1412,15 +1412,20 @@ async def admin_btn_find_id(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data == "unassign_by_user_id")
 async def start_unassign_user_id(call: CallbackQuery, state: FSMContext):
+    try:
+        await call.answer()
+    except Exception:
+        pass
     await state.set_state(AdminState.waiting_for_unassign_user_id)
     await call.message.answer("👤 Send the numeric **User ID** whose task you want to unassign:", parse_mode=ParseMode.MARKDOWN)
+
+@dp.callback_query(F.data == "unassign_all_users")
+async def process_unassign_all_users(call: CallbackQuery):
     try:
         await call.answer()
     except Exception:
         pass
 
-@dp.callback_query(F.data == "unassign_all_users")
-async def process_unassign_all_users(call: CallbackQuery):
     async with db_pool.acquire() as conn:
         assigned_tasks = await conn.fetch('''
             SELECT ta.task_id 
@@ -1443,10 +1448,6 @@ async def process_unassign_all_users(call: CallbackQuery):
             await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids)
 
     await edit_admin_message(call, "✅ <b>Successfully unassigned task(s) and returned them to the pool.</b>")
-    try:
-        await call.answer("Unassigned all tasks successfully!", show_alert=True)
-    except Exception:
-        pass
 
 @dp.message(F.text == "➕ Add Balance", StateFilter("*"))
 async def admin_btn_add_balance(message: Message, state: FSMContext):
@@ -2212,18 +2213,21 @@ async def approve_sell_unified(call: CallbackQuery):
 
             # Referral commission check (Sell Gmail = ₹5.00 reward)
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
-            if referred_by:
-                await ensure_user(referred_by)
-                ref_reward = 5.0
-                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
-                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
-                
-                ref_user_data = await get_user_data(referred_by)
-                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
-                notif_text = (
-                    f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> sell gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
-                )
-                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
+
+        if referred_by:
+            await ensure_user(referred_by)
+            ref_reward = 5.0
+            async with db_pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
+                    await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
+            
+            ref_user_data = await get_user_data(referred_by)
+            ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
+            notif_text = (
+                f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> sell gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
+            )
+            await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
 
     await edit_admin_message(call, '✅ Sell Request Approved')
     user_data = await get_user_data(user_id)
@@ -2321,18 +2325,21 @@ async def approve_task(call: CallbackQuery):
 
             # Referral commission check (Task Gmail = ₹7.00 reward)
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
-            if referred_by:
-                await ensure_user(referred_by)
-                ref_reward = 7.0
-                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
-                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
-                
-                ref_user_data = await get_user_data(referred_by)
-                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
-                notif_text = (
-                    f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> task gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
-                )
-                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
+
+        if referred_by:
+            await ensure_user(referred_by)
+            ref_reward = 7.0
+            async with db_pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
+                    await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
+            
+            ref_user_data = await get_user_data(referred_by)
+            ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
+            notif_text = (
+                f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> task gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
+            )
+            await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
             
     await edit_admin_message(call, '✅ Task Approved')
     user_data = await get_user_data(user_id)
