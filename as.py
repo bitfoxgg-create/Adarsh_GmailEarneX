@@ -124,7 +124,7 @@ async def init_db():
                 upi TEXT DEFAULT 'None',
                 usdt_address TEXT DEFAULT 'None',
                 notifications_enabled BOOLEAN DEFAULT TRUE,
-                currency TEXT DEFAULT 'INR',
+                currency TEXT DEFAULT 'USD',
                 referred_by BIGINT DEFAULT NULL,
                 referral_earnings DOUBLE PRECISION DEFAULT 0
             )
@@ -132,7 +132,7 @@ async def init_db():
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS upi TEXT DEFAULT 'None'")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS usdt_address TEXT DEFAULT 'None'")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN DEFAULT TRUE")
-        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR'")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'USD'")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT DEFAULT NULL")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_earnings DOUBLE PRECISION DEFAULT 0")
 
@@ -224,7 +224,7 @@ def invalidate_user_cache(user_id: int):
 async def ensure_user(user_id: int, referrer_id: int = None):
     async with db_pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO users (user_id, balance, upi, usdt_address, notifications_enabled, currency) VALUES ($1, 0, 'None', 'None', TRUE, 'INR') ON CONFLICT (user_id) DO NOTHING", 
+            "INSERT INTO users (user_id, balance, upi, usdt_address, notifications_enabled, currency) VALUES ($1, 0, 'None', 'None', TRUE, 'USD') ON CONFLICT (user_id) DO NOTHING", 
             user_id
         )
         if referrer_id and referrer_id != user_id:
@@ -378,7 +378,7 @@ def get_settings_keyboard(notif_enabled: bool, currency: str):
     kb = InlineKeyboardBuilder()
     notif_text = "Notifications: ON" if notif_enabled else "Notifications: OFF"
     notif_emoji = "6039486778597970865" if notif_enabled else "6039569594157371705"
-    curr_text = f"Currency: {currency} ({'₹' if currency=='INR' else '$'})"
+    curr_text = f"Currency: {currency} ({'$' if currency=='USD' else '₹'})"
     
     kb.button(text=notif_text, callback_data="toggle_notif", icon_custom_emoji_id=notif_emoji, style="primary")
     kb.button(text=curr_text, callback_data="toggle_currency", icon_custom_emoji_id="5893365462837760511", style="primary")
@@ -680,7 +680,7 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
     await state.clear()
     user_id = call.from_user.id
     user_data = await get_user_data(user_id)
-    curr = user_data['currency'] if user_data else "INR"
+    curr = user_data['currency'] if user_data else "USD"
 
     async with db_pool.acquire() as conn:
         invited_users_count = await conn.fetchval(
@@ -774,13 +774,13 @@ async def cb_toggle_notif(call: CallbackQuery):
 async def cb_toggle_currency(call: CallbackQuery):
     user_data = await get_user_data(call.from_user.id)
     current_curr = user_data['currency']
-    new_curr = "USD" if current_curr == "INR" else "INR"
+    new_curr = "INR" if current_curr == "USD" else "USD"
     
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET currency=$1 WHERE user_id=$2", new_curr, call.from_user.id)
         
     invalidate_user_cache(call.from_user.id)
-    symbol = "$" if new_curr == "USD" else "₹"
+    symbol = "₹" if new_curr == "INR" else "$"
     try:
         await call.answer(f"Currency updated to {new_curr} ({symbol})", show_alert=True)
     except Exception:
@@ -919,7 +919,7 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
     bal = user_data['balance'] if user_data else 0.0
     upi = user_data['upi'] if user_data and user_data['upi'] else "None"
     usdt = user_data['usdt_address'] if user_data and user_data['usdt_address'] else "None"
-    curr = user_data['currency'] if user_data else "INR"
+    curr = user_data['currency'] if user_data else "USD"
     
     upi_set = upi != "None" and upi != ""
     usdt_set = usdt != "None" and usdt != ""
@@ -1176,7 +1176,7 @@ async def balance(message: Message, state: FSMContext):
     bal = user_data['balance'] if user_data else 0.0
     upi = user_data['upi'] if user_data and user_data['upi'] else "None"
     usdt = user_data['usdt_address'] if user_data and user_data['usdt_address'] else "None"
-    curr = user_data['currency'] if user_data else "INR"
+    curr = user_data['currency'] if user_data else "USD"
 
     upi_set = upi != "None" and upi != ""
     usdt_set = usdt != "None" and usdt != ""
@@ -2008,7 +2008,7 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
     user_data = await get_user_data(user_id)
     bal = user_data['balance'] if user_data else 0.0
     upi = user_data['upi'] if user_data else "None"
-    curr = user_data['currency'] if user_data else "INR"
+    curr = user_data['currency'] if user_data else "USD"
 
     if upi == "None" or not upi:
         try:
@@ -2082,7 +2082,7 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
     user_data = await get_user_data(user_id)
     bal = user_data['balance'] if user_data else 0.0
     usdt = user_data['usdt_address'] if user_data else "None"
-    curr = user_data['currency'] if user_data else "INR"
+    curr = user_data['currency'] if user_data else "USD"
 
     if usdt == "None" or not usdt:
         try:
