@@ -566,8 +566,8 @@ async def cb_settings(call: CallbackQuery, state: FSMContext):
     curr = user_data['currency']
     
     text = (
-        "⚙️ <b>Settings</b>\n\n"
-        "Customize your preferences using the options below:"
+        '<tg-emoji emoji-id="5893161718179173515">⚙️</tg-emoji> <b>Settings</b>\n\n'
+        '<tg-emoji emoji-id="5902002809573740949">⚙️</tg-emoji> Customize your preferences using the options below:'
     )
     try:
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_settings_keyboard(notif, curr))
