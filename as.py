@@ -339,8 +339,11 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
     upi_link_text = "Change UPI" if upi_set else "Link UPI"
     usdt_link_text = "Change USDT BEP-20" if usdt_set else "Link USDT BEP-20"
     
-    kb.button(text=upi_link_text, callback_data="link_upi", style="primary")
-    kb.button(text=usdt_link_text, callback_data="link_usdt", style="primary")
+    upi_emoji = "6278557702109013266" if upi_set else "5902449142575141204"
+    usdt_emoji = "5197434882321567830" if usdt_set else "5902449142575141204"
+
+    kb.button(text=upi_link_text, callback_data="link_upi", icon_custom_emoji_id=upi_emoji, style="primary")
+    kb.button(text=usdt_link_text, callback_data="link_usdt", icon_custom_emoji_id=usdt_emoji, style="primary")
     kb.button(
         text="Withdraw", 
         callback_data="choose_withdraw_method", 
@@ -358,7 +361,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
 def get_withdraw_options_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(text="🏦 Withdraw via UPI", callback_data="withdraw_upi", style="success")
-    kb.button(text="🪙 Withdraw via USDT BEP-20", callback_data="withdraw_usdt", style="success")
+    kb.button(text="Withdraw via USDT BEP-20", callback_data="withdraw_usdt", icon_custom_emoji_id="5197434882321567830", style="success")
     kb.button(
         text="Back",
         callback_data="menu_balance",
@@ -731,7 +734,7 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
         f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance</b>\n\n'
         f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Available:</b> {formatted_bal}\n'
         f'<tg-emoji emoji-id="6278557702109013266">🏦</tg-emoji> <b>UPI:</b> <code>{upi}</code>\n'
-        f'🪙 <b>USDT BEP-20:</b> <code>{usdt}</code>'
+        f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> <b>USDT BEP-20:</b> <code>{usdt}</code>'
     )
     
     try:
@@ -973,7 +976,7 @@ async def balance(message: Message, state: FSMContext):
         f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance</b>\n\n'
         f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Available:</b> {formatted_bal}\n'
         f'<tg-emoji emoji-id="6278557702109013266">🏦</tg-emoji> <b>UPI:</b> <code>{upi}</code>\n'
-        f'🪙 <b>USDT BEP-20:</b> <code>{usdt}</code>'
+        f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> <b>USDT BEP-20:</b> <code>{usdt}</code>'
     )
     
     sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set))
@@ -1704,7 +1707,7 @@ async def start_link_upi(call: CallbackQuery, state: FSMContext):
     except:
         pass
     await state.set_state(UserState.setting_upi)
-    await call.message.answer('<tg-emoji emoji-id="5364109867156001787">🔡</tg-emoji> Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>', parse_mode=ParseMode.HTML)
+    await call.message.answer('<tg-emoji emoji-id="5902449142575141204">🔡</tg-emoji> Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>', parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "link_usdt")
 async def start_link_usdt(call: CallbackQuery, state: FSMContext):
@@ -1713,7 +1716,7 @@ async def start_link_usdt(call: CallbackQuery, state: FSMContext):
     except:
         pass
     await state.set_state(UserState.setting_usdt)
-    await call.message.answer('🪙 Send your <b>USDT BEP-20</b> address below:\n\n<i>Example: 0x1234567890abcdef1234567890abcdef12345678</i>', parse_mode=ParseMode.HTML)
+    await call.message.answer('<tg-emoji emoji-id="5902449142575141204">🪙</tg-emoji> Send your <b>USDT BEP-20</b> address below:\n\n<i>Example: 0x1234567890abcdef1234567890abcdef12345678</i>', parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "choose_withdraw_method")
 async def choose_withdraw_method_handler(call: CallbackQuery):
@@ -1861,7 +1864,7 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
         f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
         f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{user_id}</code>\n'
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f} (~${usdt_amount:.2f} USDT)\n'
-        f'🪙 USDT BEP-20: <code>{usdt}</code>',
+        f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> USDT BEP-20: <code>{usdt}</code>',
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
