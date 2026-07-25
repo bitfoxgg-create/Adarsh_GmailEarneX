@@ -221,12 +221,17 @@ async def load_settings_and_cache():
 def invalidate_user_cache(user_id: int):
     USER_CACHE.pop(user_id, None)
 
-async def ensure_user(user_id: int, referrer_id: int = None):
+async def ensure_user(user_id: int, referrer_id: int = None) -> bool:
+    """Returns True if a new user was created, False if user already exists."""
+    is_new = False
     async with db_pool.acquire() as conn:
-        await conn.execute(
+        result = await conn.execute(
             "INSERT INTO users (user_id, balance, upi, usdt_address, notifications_enabled, currency) VALUES ($1, 0, 'None', 'None', TRUE, 'USD') ON CONFLICT (user_id) DO NOTHING", 
             user_id
         )
+        if result == "INSERT 0 1":
+            is_new = True
+
         if referrer_id and referrer_id != user_id:
             ref_exists = await conn.fetchval("SELECT user_id FROM users WHERE user_id=$1", referrer_id)
             if ref_exists:
@@ -234,6 +239,7 @@ async def ensure_user(user_id: int, referrer_id: int = None):
                     "UPDATE users SET referred_by = $1 WHERE user_id = $2 AND referred_by IS NULL",
                     referrer_id, user_id
                 )
+    return is_new
 
 async def get_user_data(user_id: int):
     if user_id in USER_CACHE:
@@ -437,7 +443,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
     usdt_link_text = "Change USDT BEP-20" if usdt_set else "Link USDT BEP-20"
     
     upi_emoji = "6278557702109013266" if upi_set else "5902449142575141204"
-    usdt_emoji = "5197434882321567830" if usdt_set else "5902449142575141204"
+    usdt_emoji = "5197434882321567830" if upi_set else "5902449142575141204"
 
     kb.button(text=upi_link_text, callback_data="link_upi", icon_custom_emoji_id=upi_emoji, style="primary")
     kb.button(text=usdt_link_text, callback_data="link_usdt", icon_custom_emoji_id=usdt_emoji, style="primary")
@@ -627,12 +633,20 @@ async def start(message: Message, state: FSMContext, command: CommandObject = No
         if command and command.args and command.args.isdigit():
             referrer_id = int(command.args)
 
-        await ensure_user(message.from_user.id, referrer_id)
+        is_new_user = await ensure_user(message.from_user.id, referrer_id)
         
-        text = (
-            '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome back.</b>\n\n'
-            'Choose an option from the menu below:'
-        )
+        if is_new_user:
+            text = (
+                '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome to Gmail Pay Bot!</b>\n\n'
+                '💵 <b>Default Currency Selected:</b> <code>USD ($)</code>\n'
+                '⚙️ <i>You can change your currency anytime in <b>Settings</b>.</i>\n\n'
+                'Choose an option from the menu below:'
+            )
+        else:
+            text = (
+                '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome back.</b>\n\n'
+                'Choose an option from the menu below:'
+            )
         
         sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
         await state.update_data(last_menu_msg_id=sent_msg.message_id)
