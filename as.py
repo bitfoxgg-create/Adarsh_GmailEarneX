@@ -37,10 +37,11 @@ dp = Dispatcher(storage=MemoryStorage())
 db_pool = None
 BANNED_USERS_CACHE = set()
 MUST_JOIN_CHANNEL = None
+BOT_USERNAME = "Gmailpaybot"
 
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
-    "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
+    "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "👥 Referrals", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
     "➕ Add Task", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
@@ -116,13 +117,17 @@ async def init_db():
                 upi TEXT DEFAULT 'None',
                 usdt_address TEXT DEFAULT 'None',
                 notifications_enabled BOOLEAN DEFAULT TRUE,
-                currency TEXT DEFAULT 'INR'
+                currency TEXT DEFAULT 'INR',
+                referred_by BIGINT DEFAULT NULL,
+                referral_earnings DOUBLE PRECISION DEFAULT 0
             )
         ''')
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS upi TEXT DEFAULT 'None'")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS usdt_address TEXT DEFAULT 'None'")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN DEFAULT TRUE")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR'")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT DEFAULT NULL")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_earnings DOUBLE PRECISION DEFAULT 0")
 
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS banned_users (
@@ -187,7 +192,7 @@ async def init_db():
         ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id FROM banned_users")
         BANNED_USERS_CACHE = {r['user_id'] for r in rows}
@@ -195,12 +200,27 @@ async def load_settings_and_cache():
         channel_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='must_join_channel'")
         MUST_JOIN_CHANNEL = channel_val if channel_val else None
 
+    try:
+        me = await bot.get_me()
+        if me.username:
+            BOT_USERNAME = me.username
+    except Exception:
+        pass
+
 # ============================================
 # HELPERS & KEYBOARDS
 # ============================================
 
-async def ensure_user(user_id: int):
+async def ensure_user(user_id: int, referrer_id: int = None):
     async with db_pool.acquire() as conn:
+        if referrer_id and referrer_id != user_id:
+            ref_exists = await conn.fetchval("SELECT user_id FROM users WHERE user_id=$1", referrer_id)
+            if ref_exists:
+                await conn.execute(
+                    "INSERT INTO users (user_id, balance, upi, usdt_address, notifications_enabled, currency, referred_by) VALUES ($1, 0, 'None', 'None', TRUE, 'INR', $2) ON CONFLICT (user_id) DO NOTHING", 
+                    user_id, referrer_id
+                )
+                return
         await conn.execute(
             "INSERT INTO users (user_id, balance, upi, usdt_address, notifications_enabled, currency) VALUES ($1, 0, 'None', 'None', TRUE, 'INR') ON CONFLICT (user_id) DO NOTHING", 
             user_id
@@ -209,7 +229,7 @@ async def ensure_user(user_id: int):
 async def get_user_data(user_id: int):
     await ensure_user(user_id)
     async with db_pool.acquire() as conn:
-        return await conn.fetchrow("SELECT balance, upi, usdt_address, notifications_enabled, currency FROM users WHERE user_id=$1", user_id)
+        return await conn.fetchrow("SELECT balance, upi, usdt_address, notifications_enabled, currency, referred_by, referral_earnings FROM users WHERE user_id=$1", user_id)
 
 async def get_balance(user_id: int) -> float:
     data = await get_user_data(user_id)
@@ -282,6 +302,12 @@ def get_main_menu_keyboard():
         style="primary"
     )
     kb.button(
+        text="Referrals",
+        callback_data="menu_referrals",
+        icon_custom_emoji_id="5391292736647209211",
+        style="primary"
+    )
+    kb.button(
         text="Settings",
         callback_data="menu_settings",
         icon_custom_emoji_id="5893161718179173515",
@@ -293,7 +319,7 @@ def get_main_menu_keyboard():
         icon_custom_emoji_id="5274099962655816924",
         style="danger"
     )
-    kb.adjust(2, 2, 2)
+    kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
 def get_settings_keyboard(notif_enabled: bool, currency: str):
@@ -505,7 +531,7 @@ async def user_left_channel(event: ChatMemberUpdated):
 # ============================================
 
 @dp.message(Command("start"), StateFilter("*"))
-async def start(message: Message, state: FSMContext):
+async def start(message: Message, command: CommandObject, state: FSMContext):
     data = await state.get_data()
     last_msg_id = data.get("last_menu_msg_id")
     if last_msg_id:
@@ -515,7 +541,12 @@ async def start(message: Message, state: FSMContext):
             pass
 
     await state.clear()
-    await ensure_user(message.from_user.id)
+    
+    referrer_id = None
+    if command.args and command.args.isdigit():
+        referrer_id = int(command.args)
+
+    await ensure_user(message.from_user.id, referrer_id)
     
     text = (
         '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome back.</b>\n\n'
@@ -556,6 +587,53 @@ async def cb_menu_back(call: CallbackQuery, state: FSMContext):
         await state.update_data(last_menu_msg_id=sent_msg.message_id)
     else:
         await state.update_data(last_menu_msg_id=call.message.message_id)
+    await call.answer()
+
+@dp.callback_query(F.data == "menu_referrals")
+async def cb_referrals(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    user_id = call.from_user.id
+    user_data = await get_user_data(user_id)
+    curr = user_data['currency'] if user_data else "INR"
+
+    async with db_pool.acquire() as conn:
+        invited_users_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM users WHERE referred_by=$1", user_id
+        ) or 0
+        
+        approved_ref_accounts = await conn.fetchval('''
+            SELECT COUNT(*) FROM pending_sells ps
+            JOIN users u ON ps.user_id = u.user_id
+            WHERE u.referred_by = $1 AND ps.status = 'approved'
+        ''', user_id) or 0
+
+        total_earnings = user_data['referral_earnings'] if user_data else 0.0
+
+    formatted_earnings = format_currency(total_earnings, curr)
+    invite_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
+
+    text = (
+        f'<tg-emoji emoji-id="6183862417785626642">👥</tg-emoji> <b>My Referrals</b>\n'
+        f'━━━━━━━━━━━━━━━━━━\n'
+        f'<b>Total earnings:</b> {formatted_earnings}\n'
+        f'<b>Invited users:</b> {invited_users_count}\n'
+        f'<b>Approved referral accounts:</b> {approved_ref_accounts}\n'
+        f'━━━━━━━━━━━━━━━━━━\n'
+        f'<tg-emoji emoji-id="5417831807720642261">ℹ️</tg-emoji> <b>How it works</b>\n'
+        f'Share your invite link. Every time someone you invited gets a Gmail account accepted, you earn a cash referral reward — for a lifetime. No limit, it never expires.\n\n'
+        f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Referral Rewards</b>\n'
+        f'2FA accepted account: ₹ 2.89\n'
+        f'Non-2FA accepted account: ₹ 0.96\n'
+        f'Paid on every accepted account from your referrals — for life.\n\n'
+        f'<tg-emoji emoji-id="5337080053119336309">🔗</tg-emoji> <b>Your invite link:</b>\n'
+        f'<code>{invite_link}</code>'
+    )
+
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+    except:
+        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+    await state.update_data(last_menu_msg_id=call.message.message_id)
     await call.answer()
 
 @dp.callback_query(F.data == "menu_settings")
@@ -2055,6 +2133,17 @@ async def approve_sell_unified(call: CallbackQuery):
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, f"Gmail sell #{sell_id} approved")
             await conn.execute("UPDATE pending_sells SET status='approved' WHERE id=$1", sell_id)
 
+            # Referral commission check
+            referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
+            if referred_by:
+                ref_reward = 2.89  # Default 2FA rate
+                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
+                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
+                
+                ref_user_data = await get_user_data(referred_by)
+                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
+                await send_user_notification(referred_by, f"🎉 You earned a referral reward of {ref_amt_str} from an approved account!")
+
     await edit_admin_message(call, '✅ Sell Request Approved')
     user_data = await get_user_data(user_id)
     formatted_amt = format_currency(amount, user_data['currency'])
@@ -2146,6 +2235,17 @@ async def approve_task(call: CallbackQuery):
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "task", reward, f"Task #{task_id}")
             await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
             await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)
+
+            # Referral commission check
+            referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
+            if referred_by:
+                ref_reward = 2.89
+                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
+                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
+                
+                ref_user_data = await get_user_data(referred_by)
+                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
+                await send_user_notification(referred_by, f"🎉 You earned a referral reward of {ref_amt_str} from an approved account!")
             
     await edit_admin_message(call, '✅ Task Approved')
     user_data = await get_user_data(user_id)
