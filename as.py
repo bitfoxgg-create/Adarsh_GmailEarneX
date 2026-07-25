@@ -30,7 +30,7 @@ ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # You can set an environment variable or paste a direct image URL / Telegram file_id here:
-START_PHOTO = os.environ.get('START_PHOTO', 'https://ibb.co/HTyYH5JT')
+START_PHOTO = os.environ.get('START_PHOTO', 'AgACAgUAAxkBAAEsy5dqZCceNFDKmQplZFLztXxhBJBwXAACwhJrG7sMIFeBTlJcYl8fGgEAAwIAA3kAAz0E')
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
