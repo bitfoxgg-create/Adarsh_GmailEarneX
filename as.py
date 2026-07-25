@@ -321,6 +321,31 @@ def get_main_menu_keyboard():
     kb.adjust(2, 2, 2, 1)
     return kb.as_markup()
 
+def get_referral_inline_keyboard(user_id: int):
+    invite_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
+    share_url = f"https://t.me/share/url?url={invite_link}&text=Join%20Gmail%20Pay%20bot%20and%20start%20earning%20money!"
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="Copy link",
+        callback_data="copy_ref_link",
+        icon_custom_emoji_id="5271604874419647061",
+        style="primary"
+    )
+    kb.button(
+        text="Share link",
+        url=share_url,
+        icon_custom_emoji_id="5305265301917549162",
+        style="primary"
+    )
+    kb.button(
+        text="Back",
+        callback_data="menu_back",
+        icon_custom_emoji_id="6039539366177541657"
+    )
+    kb.adjust(2, 1)
+    return kb.as_markup()
+
 def get_settings_keyboard(notif_enabled: bool, currency: str):
     kb = InlineKeyboardBuilder()
     notif_text = "Notifications: ON" if notif_enabled else "Notifications: OFF"
@@ -665,12 +690,21 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
     )
 
     try:
-        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_referral_inline_keyboard(user_id))
     except:
-        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_referral_inline_keyboard(user_id))
     await state.update_data(last_menu_msg_id=call.message.message_id)
     try:
         await call.answer()
+    except Exception:
+        pass
+
+@dp.callback_query(F.data == "copy_ref_link")
+async def cb_copy_ref_link(call: CallbackQuery):
+    user_id = call.from_user.id
+    invite_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
+    try:
+        await call.answer(f"Your invite link:\n{invite_link}", show_alert=True)
     except Exception:
         pass
 
