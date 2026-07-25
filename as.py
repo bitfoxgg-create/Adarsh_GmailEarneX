@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import os
 from threading import Thread
 import urllib.parse
+import time
 from flask import Flask
 
 import asyncpg
@@ -40,6 +41,10 @@ db_pool = None
 BANNED_USERS_CACHE = set()
 MUST_JOIN_CHANNEL = None
 BOT_USERNAME = "Gmailpaybot"
+
+# IN-MEMORY SPEED CACHES
+JOINED_CACHE = {}     # {user_id: timestamp_joined}
+USER_CACHE = {}       # {user_id: dict_data}
 
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
@@ -109,7 +114,7 @@ async def init_db():
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
         
-    db_pool = await asyncpg.create_pool(dsn=url, ssl='require')
+    db_pool = await asyncpg.create_pool(dsn=url, ssl='require', min_size=3, max_size=15)
     
     async with db_pool.acquire() as conn:
         await conn.execute('''
@@ -213,6 +218,9 @@ async def load_settings_and_cache():
 # HELPERS & KEYBOARDS
 # ============================================
 
+def invalidate_user_cache(user_id: int):
+    USER_CACHE.pop(user_id, None)
+
 async def ensure_user(user_id: int, referrer_id: int = None):
     async with db_pool.acquire() as conn:
         await conn.execute(
@@ -228,9 +236,15 @@ async def ensure_user(user_id: int, referrer_id: int = None):
                 )
 
 async def get_user_data(user_id: int):
+    if user_id in USER_CACHE:
+        return USER_CACHE[user_id]
+        
     await ensure_user(user_id)
     async with db_pool.acquire() as conn:
-        return await conn.fetchrow("SELECT balance, upi, usdt_address, notifications_enabled, currency, referred_by, referral_earnings FROM users WHERE user_id=$1", user_id)
+        row = await conn.fetchrow("SELECT balance, upi, usdt_address, notifications_enabled, currency, referred_by, referral_earnings FROM users WHERE user_id=$1", user_id)
+        if row:
+            USER_CACHE[user_id] = row
+        return row
 
 async def get_balance(user_id: int) -> float:
     data = await get_user_data(user_id)
@@ -256,9 +270,20 @@ def format_currency(amount_in_inr: float, currency_code: str) -> str:
 async def check_user_joined_channel(user_id: int) -> bool:
     if not MUST_JOIN_CHANNEL:
         return True
+        
+    # Check in-memory channel membership cache (valid for 10 minutes)
+    now = time.time()
+    if user_id in JOINED_CACHE and (now - JOINED_CACHE[user_id]) < 600:
+        return True
+
     try:
         member = await bot.get_chat_member(chat_id=MUST_JOIN_CHANNEL, user_id=user_id)
-        return member.status in ['creator', 'administrator', 'member']
+        is_joined = member.status in ['creator', 'administrator', 'member']
+        if is_joined:
+            JOINED_CACHE[user_id] = now
+        else:
+            JOINED_CACHE.pop(user_id, None)
+        return is_joined
     except Exception as e:
         print(f"Error checking channel membership: {e}")
         return True
@@ -569,6 +594,7 @@ async def verify_must_join_callback(call: CallbackQuery):
 @dp.chat_member(ChatMemberUpdatedFilter(IS_MEMBER >> IS_NOT_MEMBER))
 async def user_left_channel(event: ChatMemberUpdated):
     user_id = event.from_user.id
+    JOINED_CACHE.pop(user_id, None)
     try:
         await bot.send_message(
             user_id,
@@ -685,8 +711,8 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
         f'<tg-emoji emoji-id="5417831807720642261">ℹ️</tg-emoji> <b>How it works</b>\n'
         f'Share your invite link. Every time someone you invited gets a Gmail account accepted, you earn a cash referral reward — for a lifetime. No limit, it never expires.\n\n'
         f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Referral Rewards</b>\n'
-        f'~ Task Gmail Accepted Account: {rate_task}\n'
-        f'~ Sell Gmail Accepted Account: {rate_sell}\n'
+        f'Sell Gmail accepted account: {rate_sell}\n'
+        f'Task Gmail accepted account: {rate_task}\n'
         f'Paid on every accepted account from your referrals — for life.\n\n'
         f'<tg-emoji emoji-id="5337080053119336309">🔗</tg-emoji> <b>Your invite link:</b>\n'
         f'<code>{invite_link}</code>'
@@ -732,6 +758,7 @@ async def cb_toggle_notif(call: CallbackQuery):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET notifications_enabled=$1 WHERE user_id=$2", new_notif, call.from_user.id)
         
+    invalidate_user_cache(call.from_user.id)
     status_str = "ENABLED" if new_notif else "DISABLED"
     try:
         await call.answer(f"Notifications are now {status_str}", show_alert=True)
@@ -752,6 +779,7 @@ async def cb_toggle_currency(call: CallbackQuery):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET currency=$1 WHERE user_id=$2", new_curr, call.from_user.id)
         
+    invalidate_user_cache(call.from_user.id)
     symbol = "$" if new_curr == "USD" else "₹"
     try:
         await call.answer(f"Currency updated to {new_curr} ({symbol})", show_alert=True)
@@ -1685,6 +1713,7 @@ async def process_link_upi(message: Message, state: FSMContext):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET upi=$1 WHERE user_id=$2", upi_input, message.from_user.id)
 
+    invalidate_user_cache(message.from_user.id)
     sent_msg = await message.answer(f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your UPI ID has been linked to: <code>{upi_input}</code>', parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
     await state.clear()
     await state.update_data(last_menu_msg_id=sent_msg.message_id)
@@ -1699,6 +1728,7 @@ async def process_link_usdt(message: Message, state: FSMContext):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET usdt_address=$1 WHERE user_id=$2", usdt_input, message.from_user.id)
 
+    invalidate_user_cache(message.from_user.id)
     sent_msg = await message.answer(f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your USDT BEP-20 address has been linked to: <code>{usdt_input}</code>', parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
     await state.clear()
     await state.update_data(last_menu_msg_id=sent_msg.message_id)
@@ -1768,6 +1798,8 @@ async def process_add_balance_step(message: Message, state: FSMContext):
             async with conn.transaction():
                 await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", amount, user_id)
                 await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "admin_add", amount, "Admin balance add")
+        
+        invalidate_user_cache(user_id)
         await message.answer(f"✅ Added ₹{amount} to User `{user_id}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
         await send_user_notification(user_id, f"💰 Admin added {amt_str} to your balance.")
     except Exception as e:
@@ -1795,6 +1827,7 @@ async def process_cut_balance_step(message: Message, state: FSMContext):
                 await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id=$2", amount, user_id)
                 await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "admin_cut", -amount, "Admin balance cut")
 
+        invalidate_user_cache(user_id)
         await message.answer(f"✅ Cut ₹{amount} from User `{user_id}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
         await send_user_notification(user_id, f"⚠️ Admin deducted {amt_str} from your balance.")
     except Exception as e:
@@ -2250,6 +2283,7 @@ async def approve_sell_unified(call: CallbackQuery):
                     await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
                     await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
             
+            invalidate_user_cache(referred_by)
             ref_user_data = await get_user_data(referred_by)
             ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
             notif_text = (
@@ -2257,6 +2291,7 @@ async def approve_sell_unified(call: CallbackQuery):
             )
             await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
 
+    invalidate_user_cache(user_id)
     await edit_admin_message(call, '✅ Sell Request Approved')
     user_data = await get_user_data(user_id)
     formatted_amt = format_currency(amount, user_data['currency'])
@@ -2362,6 +2397,7 @@ async def approve_task(call: CallbackQuery):
                     await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
                     await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
             
+            invalidate_user_cache(referred_by)
             ref_user_data = await get_user_data(referred_by)
             ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
             notif_text = (
@@ -2369,6 +2405,7 @@ async def approve_task(call: CallbackQuery):
             )
             await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
             
+    invalidate_user_cache(user_id)
     await edit_admin_message(call, '✅ Task Approved')
     user_data = await get_user_data(user_id)
     formatted_reward = format_currency(reward, user_data['currency'])
@@ -2463,6 +2500,7 @@ async def pay_withdraw(call: CallbackQuery):
             await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "withdrawal", -amount, "Withdrawal paid")
             
+    invalidate_user_cache(user_id)
     await edit_admin_message(call, '✅ Withdrawal Paid')
     user_data = await get_user_data(user_id)
     formatted_amt = format_currency(amount, user_data['currency'])
