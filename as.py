@@ -28,8 +28,8 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPT
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
-# Currency Conversion Rate (1 USD = 83 INR)
-USD_TO_INR = 83.0
+# Currency Conversion Rate (1 USD/USDT = 96.30 INR)
+USD_TO_INR = 96.30
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -70,6 +70,7 @@ class UserState(StatesGroup):
     selling_username = State()
     selling_password = State()
     setting_upi = State()
+    setting_usdt = State()
     submitting_task = State()
     waiting_for_support = State()
 
@@ -113,11 +114,13 @@ async def init_db():
                 user_id BIGINT PRIMARY KEY, 
                 balance DOUBLE PRECISION DEFAULT 0,
                 upi TEXT DEFAULT 'None',
+                usdt_address TEXT DEFAULT 'None',
                 notifications_enabled BOOLEAN DEFAULT TRUE,
                 currency TEXT DEFAULT 'INR'
             )
         ''')
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS upi TEXT DEFAULT 'None'")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS usdt_address TEXT DEFAULT 'None'")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN DEFAULT TRUE")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'INR'")
 
@@ -141,11 +144,15 @@ async def init_db():
                 id SERIAL PRIMARY KEY, 
                 user_id BIGINT, 
                 amount DOUBLE PRECISION, 
-                upi TEXT, 
+                method TEXT DEFAULT 'UPI',
+                payment_address TEXT, 
                 status TEXT DEFAULT 'pending', 
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        await conn.execute("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS method TEXT DEFAULT 'UPI'")
+        await conn.execute("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS payment_address TEXT")
+        
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS tasks (
                 id SERIAL PRIMARY KEY, 
@@ -195,14 +202,14 @@ async def load_settings_and_cache():
 async def ensure_user(user_id: int):
     async with db_pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO users (user_id, balance, upi, notifications_enabled, currency) VALUES ($1, 0, 'None', TRUE, 'INR') ON CONFLICT (user_id) DO NOTHING", 
+            "INSERT INTO users (user_id, balance, upi, usdt_address, notifications_enabled, currency) VALUES ($1, 0, 'None', 'None', TRUE, 'INR') ON CONFLICT (user_id) DO NOTHING", 
             user_id
         )
 
 async def get_user_data(user_id: int):
     await ensure_user(user_id)
     async with db_pool.acquire() as conn:
-        return await conn.fetchrow("SELECT balance, upi, notifications_enabled, currency FROM users WHERE user_id=$1", user_id)
+        return await conn.fetchrow("SELECT balance, upi, usdt_address, notifications_enabled, currency FROM users WHERE user_id=$1", user_id)
 
 async def get_balance(user_id: int) -> float:
     data = await get_user_data(user_id)
@@ -212,7 +219,6 @@ async def is_banned(user_id: int) -> bool:
     return user_id in BANNED_USERS_CACHE
 
 async def send_user_notification(user_id: int, text: str, **kwargs):
-    """Sends notification to user only if notifications_enabled is True."""
     user_data = await get_user_data(user_id)
     if user_data and user_data['notifications_enabled']:
         try:
@@ -278,7 +284,7 @@ def get_main_menu_keyboard():
     kb.button(
         text="Settings",
         callback_data="menu_settings",
-        icon_custom_emoji_id="5433872281489057416",
+        icon_custom_emoji_id="5893161718179173515",
         style="primary"
     )
     kb.button(
@@ -328,36 +334,16 @@ def get_admin_menu_keyboard():
     kb.adjust(2, 3, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
-def get_unassign_inline_keyboard():
+def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
     kb = InlineKeyboardBuilder()
-    kb.button(
-        text="👤 User ID", 
-        callback_data="unassign_by_user_id", 
-        icon_custom_emoji_id="5870458774455587120",
-        style="primary"
-    )
-    kb.button(
-        text="👥 All Users", 
-        callback_data="unassign_all_users", 
-        icon_custom_emoji_id="5274099962655816924",
-        style="danger"
-    )
-    kb.adjust(2)
-    return kb.as_markup()
-
-def get_balance_inline_keyboard(upi_set: bool):
-    kb = InlineKeyboardBuilder()
-    link_text = "Change UPI" if upi_set else "Link UPI"
+    upi_link_text = "Change UPI" if upi_set else "Link UPI"
+    usdt_link_text = "Change USDT BEP-20" if usdt_set else "Link USDT BEP-20"
     
-    kb.button(
-        text=f"{link_text}", 
-        callback_data="link_upi", 
-        icon_custom_emoji_id="5364109867156001787",
-        style="primary"
-    )
+    kb.button(text=upi_link_text, callback_data="link_upi", style="primary")
+    kb.button(text=usdt_link_text, callback_data="link_usdt", style="primary")
     kb.button(
         text="Withdraw", 
-        callback_data="inline_withdraw", 
+        callback_data="choose_withdraw_method", 
         icon_custom_emoji_id="5444856076954520455",
         style="success"
     )
@@ -366,7 +352,19 @@ def get_balance_inline_keyboard(upi_set: bool):
         callback_data="menu_back",
         icon_custom_emoji_id="6039539366177541657"
     )
-    kb.adjust(2, 1)
+    kb.adjust(2, 1, 1)
+    return kb.as_markup()
+
+def get_withdraw_options_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🏦 Withdraw via UPI", callback_data="withdraw_upi", style="success")
+    kb.button(text="🪙 Withdraw via USDT BEP-20", callback_data="withdraw_usdt", style="success")
+    kb.button(
+        text="Back",
+        callback_data="menu_balance",
+        icon_custom_emoji_id="6039539366177541657"
+    )
+    kb.adjust(1, 1, 1)
     return kb.as_markup()
 
 def get_back_inline_keyboard():
@@ -498,7 +496,7 @@ async def user_left_channel(event: ChatMemberUpdated):
         pass
 
 # ============================================
-# START & GLOBAL CANCEL (HIGHEST PRIORITY)
+# START & GLOBAL CANCEL
 # ============================================
 
 @dp.message(Command("start"), StateFilter("*"))
@@ -722,21 +720,24 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
     user_data = await get_user_data(call.from_user.id)
     bal = user_data['balance'] if user_data else 0.0
     upi = user_data['upi'] if user_data and user_data['upi'] else "None"
+    usdt = user_data['usdt_address'] if user_data and user_data['usdt_address'] else "None"
     curr = user_data['currency'] if user_data else "INR"
-    upi_set = upi != "None" and upi != ""
     
+    upi_set = upi != "None" and upi != ""
+    usdt_set = usdt != "None" and usdt != ""
     formatted_bal = format_currency(bal, curr)
     
     text = (
         f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance</b>\n\n'
-        f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji><b>Available:</b> {formatted_bal}\n'
-        f'<tg-emoji emoji-id="6278557702109013266">🏦</tg-emoji><b>UPI:</b> <code>{upi}</code>'
+        f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Available:</b> {formatted_bal}\n'
+        f'<tg-emoji emoji-id="6278557702109013266">🏦</tg-emoji> <b>UPI:</b> <code>{upi}</code>\n'
+        f'🪙 <b>USDT BEP-20:</b> <code>{usdt}</code>'
     )
     
     try:
-        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set))
     except Exception:
-        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
+        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set))
     await state.update_data(last_menu_msg_id=call.message.message_id)
     await call.answer()
 
@@ -961,18 +962,21 @@ async def balance(message: Message, state: FSMContext):
     user_data = await get_user_data(message.from_user.id)
     bal = user_data['balance'] if user_data else 0.0
     upi = user_data['upi'] if user_data and user_data['upi'] else "None"
+    usdt = user_data['usdt_address'] if user_data and user_data['usdt_address'] else "None"
     curr = user_data['currency'] if user_data else "INR"
 
     upi_set = upi != "None" and upi != ""
+    usdt_set = usdt != "None" and usdt != ""
     formatted_bal = format_currency(bal, curr)
     
     text = (
         f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance</b>\n\n'
-        f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji><b>Available:</b> {formatted_bal}\n'
-        f'<tg-emoji emoji-id="6278557702109013266">🏦</tg-emoji><b>UPI:</b> <code>{upi}</code>'
+        f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Available:</b> {formatted_bal}\n'
+        f'<tg-emoji emoji-id="6278557702109013266">🏦</tg-emoji> <b>UPI:</b> <code>{upi}</code>\n'
+        f'🪙 <b>USDT BEP-20:</b> <code>{usdt}</code>'
     )
     
-    sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
+    sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set))
     await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 @dp.message(Command("sell"), StateFilter("*"))
@@ -1354,7 +1358,7 @@ async def set_must_join_command(message: Message, state: FSMContext):
     )
 
 # ============================================
-# INPUT PROCESSORS FOR STATES (FILTER OUT BUTTON CLICKS)
+# INPUT PROCESSORS FOR STATES
 # ============================================
 
 @dp.message(AdminState.waiting_for_find_id_query, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
@@ -1437,6 +1441,20 @@ async def process_link_upi(message: Message, state: FSMContext):
         await conn.execute("UPDATE users SET upi=$1 WHERE user_id=$2", upi_input, message.from_user.id)
 
     sent_msg = await message.answer(f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your UPI ID has been linked to: <code>{upi_input}</code>', parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+    await state.clear()
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
+
+@dp.message(UserState.setting_usdt, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_link_usdt(message: Message, state: FSMContext):
+    usdt_input = message.text.strip()
+    if not usdt_input.startswith("0x") or len(usdt_input) != 42:
+        await message.answer('<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Invalid USDT BEP-20 address format. Please send a valid 42-character Binance Smart Chain address starting with <code>0x</code>.', parse_mode=ParseMode.HTML)
+        return
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET usdt_address=$1 WHERE user_id=$2", usdt_input, message.from_user.id)
+
+    sent_msg = await message.answer(f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your USDT BEP-20 address has been linked to: <code>{usdt_input}</code>', parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
     await state.clear()
     await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
@@ -1545,9 +1563,10 @@ async def process_check_balance_step(message: Message, state: FSMContext):
         user_data = await get_user_data(target_id)
         bal = user_data['balance'] if user_data else 0.0
         upi = user_data['upi'] if user_data else "None"
+        usdt = user_data['usdt_address'] if user_data else "None"
         banned = await is_banned(target_id)
         status = "🔴 Banned" if banned else "🟢 Active"
-        await message.answer(f"👤 **User ID:** `{target_id}`\n💰 **Balance:** ₹{bal:.2f}\n🏦 **UPI:** `{upi}`\n📌 **Status:** {status}", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        await message.answer(f"👤 **User ID:** `{target_id}`\n💰 **Balance:** ₹{bal:.2f}\n🏦 **UPI:** `{upi}`\n🪙 **USDT:** `{usdt}`\n📌 **Status:** {status}", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
     except ValueError:
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
@@ -1687,8 +1706,26 @@ async def start_link_upi(call: CallbackQuery, state: FSMContext):
     await state.set_state(UserState.setting_upi)
     await call.message.answer('<tg-emoji emoji-id="5364109867156001787">🔡</tg-emoji> Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>', parse_mode=ParseMode.HTML)
 
-@dp.callback_query(F.data == "inline_withdraw")
-async def inline_withdraw_handler(call: CallbackQuery):
+@dp.callback_query(F.data == "link_usdt")
+async def start_link_usdt(call: CallbackQuery, state: FSMContext):
+    try:
+        await call.answer()
+    except:
+        pass
+    await state.set_state(UserState.setting_usdt)
+    await call.message.answer('🪙 Send your <b>USDT BEP-20</b> address below:\n\n<i>Example: 0x1234567890abcdef1234567890abcdef12345678</i>', parse_mode=ParseMode.HTML)
+
+@dp.callback_query(F.data == "choose_withdraw_method")
+async def choose_withdraw_method_handler(call: CallbackQuery):
+    text = "💳 <b>Select Withdrawal Method:</b>"
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_withdraw_options_keyboard())
+        await call.answer()
+    except Exception as e:
+        print(f"Error choosing withdraw method: {e}")
+
+@dp.callback_query(F.data == "withdraw_upi")
+async def inline_withdraw_upi_handler(call: CallbackQuery):
     user_id = call.from_user.id
     user_data = await get_user_data(user_id)
     bal = user_data['balance'] if user_data else 0.0
@@ -1697,7 +1734,7 @@ async def inline_withdraw_handler(call: CallbackQuery):
 
     if upi == "None" or not upi:
         try:
-            await call.answer("❌ Please link your UPI ID first before withdrawing!", show_alert=True)
+            await call.answer("❌ Please link your UPI ID first before withdrawing via UPI!", show_alert=True)
         except:
             pass
         return
@@ -1725,7 +1762,7 @@ async def inline_withdraw_handler(call: CallbackQuery):
             return
 
         withdraw_id = await conn.fetchval(
-            'INSERT INTO withdrawals(user_id, amount, upi) VALUES ($1, $2, $3) RETURNING id',
+            "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, 'UPI', $3) RETURNING id",
             user_id, bal, upi
         )
 
@@ -1745,11 +1782,11 @@ async def inline_withdraw_handler(call: CallbackQuery):
     
     await bot.send_message(
         ADMIN_ID,
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id} (UPI)</b>\n\n'
         f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
         f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{user_id}</code>\n'
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f}\n'
-        f'<tg-emoji emoji-id="6152069549442208798">🤑</tg-emoji> UPI: <code>{upi}</code>',
+        f'<tg-emoji emoji-id="6152069549442208798">🏦</tg-emoji> UPI: <code>{upi}</code>',
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
@@ -1757,6 +1794,81 @@ async def inline_withdraw_handler(call: CallbackQuery):
     bal_display = format_currency(bal, curr)
     try:
         await call.message.edit_text(f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of {bal_display} sent to admin using UPI: <code>{upi}</code>', parse_mode=ParseMode.HTML)
+        await call.answer()
+    except Exception as e:
+        print(f"Error editing withdraw msg: {e}")
+
+@dp.callback_query(F.data == "withdraw_usdt")
+async def inline_withdraw_usdt_handler(call: CallbackQuery):
+    user_id = call.from_user.id
+    user_data = await get_user_data(user_id)
+    bal = user_data['balance'] if user_data else 0.0
+    usdt = user_data['usdt_address'] if user_data else "None"
+    curr = user_data['currency'] if user_data else "INR"
+
+    if usdt == "None" or not usdt:
+        try:
+            await call.answer("❌ Please link your USDT BEP-20 address first before withdrawing!", show_alert=True)
+        except:
+            pass
+        return
+
+    MIN_WITHDRAW = 150.0
+    if bal < MIN_WITHDRAW:
+        min_withdraw_str = format_currency(MIN_WITHDRAW, curr)
+        bal_str = format_currency(bal, curr)
+        try:
+            await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
+        except:
+            pass
+        return
+
+    async with db_pool.acquire() as conn:
+        existing_pending = await conn.fetchrow(
+            "SELECT id FROM withdrawals WHERE user_id = $1 AND status = 'pending'",
+            user_id
+        )
+        if existing_pending:
+            try:
+                await call.answer("⚠️ You already have a pending withdrawal request! Please wait for it to be processed.", show_alert=True)
+            except:
+                pass
+            return
+
+        withdraw_id = await conn.fetchval(
+            "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, 'USDT BEP-20', $3) RETURNING id",
+            user_id, bal, usdt
+        )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text='Pay', 
+        callback_data=f'pay:{withdraw_id}:{user_id}:{bal}',
+        icon_custom_emoji_id="5444856076954520455",
+        style="success"
+    )
+    kb.button(
+        text='Reject', 
+        callback_data=f'reject:{withdraw_id}:{user_id}',
+        icon_custom_emoji_id="5274099962655816924",
+        style="danger"
+    )
+    
+    usdt_amount = bal / USD_TO_INR
+    await bot.send_message(
+        ADMIN_ID,
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id} (USDT BEP-20)</b>\n\n'
+        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
+        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{user_id}</code>\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f} (~${usdt_amount:.2f} USDT)\n'
+        f'🪙 USDT BEP-20: <code>{usdt}</code>',
+        reply_markup=kb.as_markup(),
+        parse_mode=ParseMode.HTML
+    )
+
+    bal_display = format_currency(bal, curr)
+    try:
+        await call.message.edit_text(f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of {bal_display} (~${usdt_amount:.2f} USDT) sent to admin using USDT address: <code>{usdt}</code>', parse_mode=ParseMode.HTML)
         await call.answer()
     except Exception as e:
         print(f"Error editing withdraw msg: {e}")
