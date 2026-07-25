@@ -298,11 +298,12 @@ def get_main_menu_keyboard():
 
 def get_settings_keyboard(notif_enabled: bool, currency: str):
     kb = InlineKeyboardBuilder()
-    notif_text = "🔔 Notifications: ON" if notif_enabled else "🔕 Notifications: OFF"
-    curr_text = f"💱 Currency: {currency} ({'₹' if currency=='INR' else '$'})"
+    notif_text = "Notifications: ON" if notif_enabled else "Notifications: OFF"
+    notif_emoji = "6039486778597970865" if notif_enabled else "6039569594157371705"
+    curr_text = f"Currency: {currency} ({'₹' if currency=='INR' else '$'})"
     
-    kb.button(text=notif_text, callback_data="toggle_notif", style="primary")
-    kb.button(text=curr_text, callback_data="toggle_currency", style="primary")
+    kb.button(text=notif_text, callback_data="toggle_notif", icon_custom_emoji_id=notif_emoji, style="primary")
+    kb.button(text=curr_text, callback_data="toggle_currency", icon_custom_emoji_id="5893365462837760511", style="primary")
     kb.button(
         text="Back",
         callback_data="menu_back",
@@ -360,7 +361,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
 
 def get_withdraw_options_keyboard():
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏦 Withdraw via UPI", callback_data="withdraw_upi", style="success")
+    kb.button(text="Withdraw via UPI", callback_data="withdraw_upi", icon_custom_emoji_id="6278557702109013266", style="success")
     kb.button(text="Withdraw via USDT BEP-20", callback_data="withdraw_usdt", icon_custom_emoji_id="5197434882321567830", style="success")
     kb.button(
         text="Back",
@@ -583,7 +584,7 @@ async def cb_toggle_notif(call: CallbackQuery):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE users SET notifications_enabled=$1 WHERE user_id=$2", new_notif, call.from_user.id)
         
-    status_str = "ENABLED 🔔" if new_notif else "DISABLED 🔕"
+    status_str = "ENABLED" if new_notif else "DISABLED"
     await call.answer(f"Notifications are now {status_str}", show_alert=True)
     
     try:
@@ -1720,7 +1721,7 @@ async def start_link_usdt(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "choose_withdraw_method")
 async def choose_withdraw_method_handler(call: CallbackQuery):
-    text = "💳 <b>Select Withdrawal Method:</b>"
+    text = "<tg-emoji emoji-id=\"5445353829304387411\">💳</tg-emoji> <b>Select Withdrawal Method:</b>"
     try:
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_withdraw_options_keyboard())
         await call.answer()
