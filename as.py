@@ -41,7 +41,7 @@ MUST_JOIN_CHANNEL = None
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
-    "➕ Add Task", "📥 Pending Reviews", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
+    "➕ Add Task", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel"
@@ -316,6 +316,7 @@ def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
     kb.button(text="➕ Add Task", style="success")
     kb.button(text="📥 Pending Reviews", style="primary")
+    kb.button(text="💸 Pending Withdrawals", style="primary")
     kb.button(text="💬 Chat", style="primary")
     kb.button(text="🗑 Unassign Tasks", style="danger")
     kb.button(text="🔍 Find ID", style="primary")
@@ -332,7 +333,7 @@ def get_admin_menu_keyboard():
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(2, 3, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
@@ -1168,6 +1169,63 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
             parse_mode=ParseMode.HTML
         )
 
+@dp.message(F.text == "💸 Pending Withdrawals", StateFilter("*"))
+async def admin_btn_pending_withdrawals(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+
+    async with db_pool.acquire() as conn:
+        withdraw_rows = await conn.fetch('''
+            SELECT id, user_id, amount, method, payment_address, created_at
+            FROM withdrawals
+            WHERE status = 'pending'
+            ORDER BY created_at ASC
+        ''')
+
+    if not withdraw_rows:
+        await message.answer("📭 <b>No pending withdrawal requests found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+        return
+
+    await message.answer(f"💸 <b>Found {len(withdraw_rows)} pending withdrawal request(s). Displaying below:</b>", parse_mode=ParseMode.HTML)
+
+    for r in withdraw_rows:
+        withdraw_id = r['id']
+        user_id = r['user_id']
+        amount = r['amount']
+        method = r['method'] or 'UPI'
+        payment_address = r['payment_address'] or 'None'
+        
+        extra_usdt_info = f" (~${(amount / USD_TO_INR):.2f} USDT)" if method == "USDT BEP-20" else ""
+
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(
+                text="Pay", 
+                callback_data=f"pay:{withdraw_id}:{user_id}:{amount}", 
+                icon_custom_emoji_id="5444856076954520455", 
+                style="success"
+            ),
+            InlineKeyboardButton(
+                text="Reject", 
+                callback_data=f"reject:{withdraw_id}:{user_id}", 
+                icon_custom_emoji_id="5274099962655816924", 
+                style="danger"
+            )
+        ]])
+
+        address_emoji = '<tg-emoji emoji-id="6152069549442208798">🏦</tg-emoji>' if method == 'UPI' else '<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji>'
+
+        await message.answer(
+            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
+            f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <b>User ID:</b> <code>{user_id}</code>\n'
+            f'💳 <b>Method:</b> <code>{method}</code>\n'
+            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Amount:</b> ₹{amount:.2f}{extra_usdt_info}\n'
+            f'{address_emoji} <b>Address:</b> <code>{payment_address}</code>\n'
+            f'📅 <b>Date:</b> {r["created_at"].strftime("%Y-%m-%d %H:%M:%S")}',
+            reply_markup=kb,
+            parse_mode=ParseMode.HTML
+        )
+
 @dp.message(F.text == "💬 Chat", StateFilter("*"))
 async def admin_btn_chat(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -1296,6 +1354,7 @@ async def admin_btn_view_stats(message: Message, state: FSMContext):
         assigned_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='assigned'")
         pending_review_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='pending_review'")
         pending_sells = await conn.fetchval("SELECT COUNT(*) FROM pending_sells WHERE status='pending_review'")
+        pending_withdrawals = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status='pending'")
         completed_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='completed'")
 
     total_pending = (pending_review_tasks or 0) + (pending_sells or 0)
@@ -1307,6 +1366,7 @@ async def admin_btn_view_stats(message: Message, state: FSMContext):
         f"🟢 <b>Available (Unassigned Pool):</b> <code>{avail_tasks}</code>\n"
         f"💼 <b>Assigned (Active with Users):</b> <code>{assigned_tasks}</code>\n"
         f"⏳ <b>Pending Review (Tasks + Sells):</b> <code>{total_pending}</code>\n"
+        f"💸 <b>Pending Withdrawals:</b> <code>{pending_withdrawals or 0}</code>\n"
         f"✅ <b>Completed (Approved):</b> <code>{completed_tasks}</code>"
     )
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
