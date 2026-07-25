@@ -16,7 +16,8 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    ChatMemberUpdated
+    ChatMemberUpdated,
+    FSInputFile
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
@@ -27,6 +28,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
 DATABASE_URL = os.environ.get('DATABASE_URL')
+START_PHOTO_PATH = os.environ.get('START_PHOTO_PATH', 'start.jpg')  # Save image as start.jpg or provide path/URL
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -359,6 +361,20 @@ def get_support_cancel_keyboard():
     kb.adjust(1)
     return kb.as_markup()
 
+async def edit_or_send_text(call: CallbackQuery, text: str, reply_markup=None):
+    """Helper to update a message safely whether the previous message was text or photo."""
+    if call.message.photo:
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        return await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+    else:
+        try:
+            return await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        except Exception:
+            return await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
 async def edit_admin_message(call: CallbackQuery, additional_text: str):
     try:
         if call.message.photo:
@@ -455,6 +471,21 @@ async def user_left_channel(event: ChatMemberUpdated):
 # START & GLOBAL CANCEL (HIGHEST PRIORITY)
 # ============================================
 
+async def send_start_menu_photo(chat_id: int, caption_text: str, reply_markup):
+    """Sends the start menu photo with caption."""
+    if os.path.exists(START_PHOTO_PATH):
+        photo = FSInputFile(START_PHOTO_PATH)
+    else:
+        photo = START_PHOTO_PATH  # Can be URL or File ID
+        
+    return await bot.send_photo(
+        chat_id=chat_id,
+        photo=photo,
+        caption=caption_text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=reply_markup
+    )
+
 @dp.message(Command("start"), StateFilter("*"))
 async def start(message: Message, state: FSMContext):
     data = await state.get_data()
@@ -473,7 +504,12 @@ async def start(message: Message, state: FSMContext):
         'Choose an option from the menu below:'
     )
     
-    sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+    try:
+        sent_msg = await send_start_menu_photo(message.chat.id, text, get_main_menu_keyboard())
+    except Exception as e:
+        print(f"Failed to send start photo, sending text instead: {e}")
+        sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+        
     await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 @dp.message(Command("cancel"), StateFilter("*"))
@@ -500,13 +536,18 @@ async def cb_menu_back(call: CallbackQuery, state: FSMContext):
         '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome back.</b>\n\n'
         'Choose an option from the menu below:'
     )
+    
     try:
-        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
-    except:
+        await call.message.delete()
+    except Exception:
+        pass
+
+    try:
+        sent_msg = await send_start_menu_photo(call.message.chat.id, text, get_main_menu_keyboard())
+    except Exception:
         sent_msg = await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
-        await state.update_data(last_menu_msg_id=sent_msg.message_id)
-    else:
-        await state.update_data(last_menu_msg_id=call.message.message_id)
+        
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
     await call.answer()
 
 @dp.callback_query(F.data == "menu_get_task")
@@ -528,11 +569,8 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
             
             if task_status == 'pending_review':
                 txt = '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Your task submission is currently under admin review. Please wait for approval.'
-                try:
-                    await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
-                except:
-                    await call.message.answer(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
-                await state.update_data(last_menu_msg_id=call.message.message_id)
+                sent_msg = await edit_or_send_text(call, txt, reply_markup=get_main_menu_keyboard())
+                await state.update_data(last_menu_msg_id=sent_msg.message_id)
                 await call.answer()
                 return
 
@@ -560,11 +598,8 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
                     f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{existing["reward"]}\n\n'
                     f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Time Remaining: {mins}m {secs}s'
                 )
-                try:
-                    await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
-                except:
-                    await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
-                await state.update_data(last_menu_msg_id=call.message.message_id)
+                sent_msg = await edit_or_send_text(call, txt, reply_markup=get_task_action_keyboard())
+                await state.update_data(last_menu_msg_id=sent_msg.message_id)
                 await call.answer()
                 return
             else:
@@ -575,11 +610,8 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
         task = await conn.fetchrow("SELECT id, title, details, reward FROM tasks WHERE status='available' ORDER BY RANDOM() LIMIT 1")
         if not task:
             txt = '📭 No tasks available right now.'
-            try:
-                await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard())
-            except:
-                await call.message.answer(txt, reply_markup=get_main_menu_keyboard())
-            await state.update_data(last_menu_msg_id=call.message.message_id)
+            sent_msg = await edit_or_send_text(call, txt, reply_markup=get_main_menu_keyboard())
+            await state.update_data(last_menu_msg_id=sent_msg.message_id)
             await call.answer()
             return
         
@@ -606,11 +638,8 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}\n\n'
         f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> You have ONLY 30 MINUTES to complete this task.'
     )
-    try:
-        await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
-    except:
-        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
-    await state.update_data(last_menu_msg_id=call.message.message_id)
+    sent_msg = await edit_or_send_text(call, txt, reply_markup=get_task_action_keyboard())
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
     await call.answer()
 
 @dp.callback_query(F.data == "menu_balance")
@@ -627,11 +656,8 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
         f'<tg-emoji emoji-id="6278557702109013266">🏦</tg-emoji><b>UPI:</b> <code>{upi}</code>'
     )
     
-    try:
-        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
-    except Exception:
-        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set))
-    await state.update_data(last_menu_msg_id=call.message.message_id)
+    sent_msg = await edit_or_send_text(call, text, reply_markup=get_balance_inline_keyboard(upi_set))
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
     await call.answer()
 
 @dp.callback_query(F.data == "menu_sell_gmail")
@@ -642,11 +668,8 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
         '<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>Sell Price 30₹/Gmail</b>\n\n'
         '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail <b>Username</b> (e.g., <code>example@gmail.com</code>):'
     )
-    try:
-        await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
-    except:
-        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
-    await state.update_data(last_menu_msg_id=call.message.message_id)
+    sent_msg = await edit_or_send_text(call, txt, reply_markup=get_back_inline_keyboard())
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
     await call.answer()
 
 @dp.callback_query(F.data == "menu_history")
@@ -656,11 +679,8 @@ async def cb_history(call: CallbackQuery, state: FSMContext):
         rows = await conn.fetch("SELECT type, amount, note, created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 10", call.from_user.id)
     if not rows:
         txt = "📭 No transactions found."
-        try:
-            await call.message.edit_text(txt, reply_markup=get_back_inline_keyboard())
-        except:
-            await call.message.answer(txt, reply_markup=get_back_inline_keyboard())
-        await state.update_data(last_menu_msg_id=call.message.message_id)
+        sent_msg = await edit_or_send_text(call, txt, reply_markup=get_back_inline_keyboard())
+        await state.update_data(last_menu_msg_id=sent_msg.message_id)
         await call.answer()
         return
     text = '<tg-emoji emoji-id="5440410042773824003">📜</tg-emoji> <b>Last Transactions</b>\n\n'
@@ -668,11 +688,8 @@ async def cb_history(call: CallbackQuery, state: FSMContext):
         sign = "+" if r['amount'] >= 0 else ""
         text += f"• {sign}₹{r['amount']:.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
     
-    try:
-        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
-    except:
-        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
-    await state.update_data(last_menu_msg_id=call.message.message_id)
+    sent_msg = await edit_or_send_text(call, text, reply_markup=get_back_inline_keyboard())
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
     await call.answer()
 
 @dp.callback_query(F.data == "menu_support")
@@ -683,11 +700,8 @@ async def cb_support(call: CallbackQuery, state: FSMContext):
         "🛠 <b>Customer Support</b>\n\n"
         "Please send your help message or describe your issue below. Our admin team will look into it shortly."
     )
-    try:
-        await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
-    except:
-        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
-    await state.update_data(last_menu_msg_id=call.message.message_id)
+    sent_msg = await edit_or_send_text(call, txt, reply_markup=get_support_cancel_keyboard())
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
     await call.answer()
 
 # ============================================
@@ -1635,7 +1649,7 @@ async def inline_withdraw_handler(call: CallbackQuery):
     )
 
     try:
-        await call.message.edit_text(f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of ₹{bal:.2f} sent to admin using UPI: <code>{upi}</code>', parse_mode=ParseMode.HTML)
+        await edit_or_send_text(call, f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of ₹{bal:.2f} sent to admin using UPI: <code>{upi}</code>')
         await call.answer()
     except Exception as e:
         print(f"Error editing withdraw msg: {e}")
@@ -1697,7 +1711,7 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
             
     try:
-        await call.message.edit_text(f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Task #{task_id} has been cancelled and returned to the pool.', parse_mode=ParseMode.HTML)
+        await edit_or_send_text(call, f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Task #{task_id} has been cancelled and returned to the pool.')
         await call.answer()
     except:
         pass
