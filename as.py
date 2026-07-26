@@ -228,11 +228,13 @@ async def load_settings_and_cache():
 def invalidate_user_cache(user_id: int):
     USER_CACHE.pop(user_id, None)
 
-async def ensure_user(user_id: int, referrer_id: int = None) -> bool:
+async def ensure_user(user_id: int, referrer_id: int = None, conn=None) -> bool:
     """Returns True if a new user was created, False if user already exists."""
     is_new = False
-    async with db_pool.acquire() as conn:
-        result = await conn.execute(
+    
+    async def _run_ensure(c):
+        nonlocal is_new
+        result = await c.execute(
             "INSERT INTO users (user_id, balance, upi, usdt_address, notifications_enabled, currency) VALUES ($1, 0, 'None', 'None', TRUE, 'USD') ON CONFLICT (user_id) DO NOTHING", 
             user_id
         )
@@ -240,12 +242,19 @@ async def ensure_user(user_id: int, referrer_id: int = None) -> bool:
             is_new = True
 
         if referrer_id and referrer_id != user_id:
-            ref_exists = await conn.fetchval("SELECT user_id FROM users WHERE user_id=$1", referrer_id)
+            ref_exists = await c.fetchval("SELECT user_id FROM users WHERE user_id=$1", referrer_id)
             if ref_exists:
-                await conn.execute(
+                await c.execute(
                     "UPDATE users SET referred_by = $1 WHERE user_id = $2 AND referred_by IS NULL",
                     referrer_id, user_id
                 )
+
+    if conn:
+        await _run_ensure(conn)
+    else:
+        async with db_pool.acquire() as c:
+            await _run_ensure(c)
+
     return is_new
 
 async def get_user_data(user_id: int):
@@ -1720,7 +1729,7 @@ async def process_unassign_user_id_step(message: Message, state: FSMContext):
                 await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
 
         await message.answer(f"✅ **Task #{task_id}** held by User `{target_id}` has been unassigned and returned to the pool.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
-        await send_user_notification(target_id, f"⚠️ Your current Task #{task_id} has been unassigned by the admin and returned to the pool.")
+        asyncio.create_task(send_user_notification(target_id, f"⚠️ Your current Task #{task_id} has been unassigned by the admin and returned to the pool."))
     except ValueError:
         await message.answer("❌ Invalid User ID. Please enter a valid numeric ID.", parse_mode=ParseMode.MARKDOWN)
 
@@ -1824,7 +1833,7 @@ async def process_add_balance_step(message: Message, state: FSMContext):
         
         invalidate_user_cache(user_id)
         await message.answer(f"✅ Added ₹{amount} to User `{user_id}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
-        await send_user_notification(user_id, f"💰 Admin added {amt_str} to your balance.")
+        asyncio.create_task(send_user_notification(user_id, f"💰 Admin added {amt_str} to your balance."))
     except Exception as e:
         await message.answer(f"❌ Format error: {e}. Please send in format: `USER_ID AMOUNT`", parse_mode=ParseMode.MARKDOWN)
     await state.clear()
@@ -1852,7 +1861,7 @@ async def process_cut_balance_step(message: Message, state: FSMContext):
 
         invalidate_user_cache(user_id)
         await message.answer(f"✅ Cut ₹{amount} from User `{user_id}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
-        await send_user_notification(user_id, f"⚠️ Admin deducted {amt_str} from your balance.")
+        asyncio.create_task(send_user_notification(user_id, f"⚠️ Admin deducted {amt_str} from your balance."))
     except Exception as e:
         await message.answer(f"❌ Format error: {e}. Please send in format: `USER_ID AMOUNT`", parse_mode=ParseMode.MARKDOWN)
     await state.clear()
@@ -1915,7 +1924,7 @@ async def process_ban_user_step(message: Message, state: FSMContext):
 
         BANNED_USERS_CACHE.add(target_id)
         await message.answer(f"🚫 **User `{target_id}` has been banned.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
-        await send_user_notification(target_id, "🚫 You have been banned from using this bot.")
+        asyncio.create_task(send_user_notification(target_id, "🚫 You have been banned from using this bot."))
     except ValueError:
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
@@ -1929,7 +1938,7 @@ async def process_unban_user_step(message: Message, state: FSMContext):
 
         BANNED_USERS_CACHE.discard(target_id)
         await message.answer(f"✅ **User `{target_id}` has been unbanned.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
-        await send_user_notification(target_id, "🎉 Your ban has been lifted! You can now use the bot again.")
+        asyncio.create_task(send_user_notification(target_id, "🎉 Your ban has been lifted! You can now use the bot again."))
     except ValueError:
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
@@ -2283,9 +2292,9 @@ async def approve_sell_unified(call: CallbackQuery):
     user_id = int(user_id_str)
     amount = float(amount_str)
 
-    await ensure_user(user_id)
-
     async with db_pool.acquire() as conn:
+        await ensure_user(user_id, conn=conn)
+
         status = await conn.fetchval("SELECT status FROM pending_sells WHERE id=$1", sell_id)
         if status != 'pending_review':
             return
@@ -2295,30 +2304,36 @@ async def approve_sell_unified(call: CallbackQuery):
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, f"Gmail sell #{sell_id} approved")
             await conn.execute("UPDATE pending_sells SET status='approved' WHERE id=$1", sell_id)
 
-            # Referral commission check (Sell Gmail = ₹5.00 reward)
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
 
         if referred_by:
-            await ensure_user(referred_by)
+            await ensure_user(referred_by, conn=conn)
             ref_reward = 5.0
-            async with db_pool.acquire() as conn:
-                async with conn.transaction():
-                    await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
-                    await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
+            async with conn.transaction():
+                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
+                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
             
             invalidate_user_cache(referred_by)
-            ref_user_data = await get_user_data(referred_by)
-            ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
-            notif_text = (
-                f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> sell gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
-            )
-            await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
+            
+            async def notify_ref():
+                ref_user_data = await get_user_data(referred_by)
+                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
+                notif_text = (
+                    f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> sell gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
+                )
+                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
+            
+            asyncio.create_task(notify_ref())
 
     invalidate_user_cache(user_id)
     await edit_admin_message(call, '✅ Sell Request Approved')
-    user_data = await get_user_data(user_id)
-    formatted_amt = format_currency(amount, user_data['currency'])
-    await send_user_notification(user_id, f"🎉 Your Gmail sell request #{sell_id} was approved!\n+{formatted_amt} added to your balance.")
+    
+    async def notify_user():
+        user_data = await get_user_data(user_id)
+        formatted_amt = format_currency(amount, user_data['currency'])
+        await send_user_notification(user_id, f"🎉 Your Gmail sell request #{sell_id} was approved!\n+{formatted_amt} added to your balance.")
+
+    asyncio.create_task(notify_user())
 
 @dp.callback_query(F.data.startswith("selldecline_db:"))
 async def decline_sell_unified(call: CallbackQuery, state: FSMContext):
@@ -2369,11 +2384,11 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
     except Exception as e:
         print(f"Error editing admin msg: {e}")
 
-    await send_user_notification(
+    asyncio.create_task(send_user_notification(
         user_id, 
         f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}', 
         parse_mode=ParseMode.HTML
-    )
+    ))
 
     await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason sent to user.', parse_mode=ParseMode.HTML)
     await state.clear()
@@ -2401,7 +2416,7 @@ async def approve_task(call: CallbackQuery):
         assigned_user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
         user_id = assigned_user_id if assigned_user_id else int(callback_user_id)
 
-        await ensure_user(user_id)
+        await ensure_user(user_id, conn=conn)
 
         async with conn.transaction():
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", reward, user_id)
@@ -2409,30 +2424,36 @@ async def approve_task(call: CallbackQuery):
             await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
             await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)
 
-            # Referral commission check (Task Gmail = ₹7.00 reward)
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
 
         if referred_by:
-            await ensure_user(referred_by)
+            await ensure_user(referred_by, conn=conn)
             ref_reward = 7.0
-            async with db_pool.acquire() as conn:
-                async with conn.transaction():
-                    await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
-                    await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
+            async with conn.transaction():
+                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
+                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
             
             invalidate_user_cache(referred_by)
-            ref_user_data = await get_user_data(referred_by)
-            ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
-            notif_text = (
-                f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> task gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
-            )
-            await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
+
+            async def notify_ref():
+                ref_user_data = await get_user_data(referred_by)
+                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
+                notif_text = (
+                    f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> task gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
+                )
+                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
+
+            asyncio.create_task(notify_ref())
             
     invalidate_user_cache(user_id)
     await edit_admin_message(call, '✅ Task Approved')
-    user_data = await get_user_data(user_id)
-    formatted_reward = format_currency(reward, user_data['currency'])
-    await send_user_notification(user_id, f"🎉 Task approved!\n+{formatted_reward} added to your balance.")
+
+    async def notify_user():
+        user_data = await get_user_data(user_id)
+        formatted_reward = format_currency(reward, user_data['currency'])
+        await send_user_notification(user_id, f"🎉 Task approved!\n+{formatted_reward} added to your balance.")
+
+    asyncio.create_task(notify_user())
 
 @dp.callback_query(F.data.startswith("taskdecline:"))
 async def decline_task(call: CallbackQuery, state: FSMContext):
@@ -2486,11 +2507,11 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
     except Exception as e:
         print(f"Error editing admin msg: {e}")
 
-    await send_user_notification(
+    asyncio.create_task(send_user_notification(
         user_id, 
         f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your submission for Task #{task_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}\n\n<tg-emoji emoji-id="5251203410396458957">🛡</tg-emoji> The task has been returned to the pool.', 
         parse_mode=ParseMode.HTML
-    )
+    ))
 
     await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason recorded and user notified.', parse_mode=ParseMode.HTML)
     await state.clear()
@@ -2510,10 +2531,10 @@ async def pay_withdraw(call: CallbackQuery):
     withdrawal_id = int(withdrawal_id)
     user_id = int(user_id)
     amount = float(amount)
-    
-    await ensure_user(user_id)
 
     async with db_pool.acquire() as conn:
+        await ensure_user(user_id, conn=conn)
+
         status = await conn.fetchval("SELECT status FROM withdrawals WHERE id=$1", withdrawal_id)
         if status != 'pending':
             return
@@ -2525,9 +2546,13 @@ async def pay_withdraw(call: CallbackQuery):
             
     invalidate_user_cache(user_id)
     await edit_admin_message(call, '✅ Withdrawal Paid')
-    user_data = await get_user_data(user_id)
-    formatted_amt = format_currency(amount, user_data['currency'])
-    await send_user_notification(user_id, f"🎉 Withdrawal of {formatted_amt} has been paid.")
+
+    async def notify_user():
+        user_data = await get_user_data(user_id)
+        formatted_amt = format_currency(amount, user_data['currency'])
+        await send_user_notification(user_id, f"🎉 Withdrawal of {formatted_amt} has been paid.")
+
+    asyncio.create_task(notify_user())
 
 @dp.callback_query(F.data.startswith("reject:"))
 async def reject_withdraw(call: CallbackQuery):
@@ -2548,7 +2573,7 @@ async def reject_withdraw(call: CallbackQuery):
         await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
         
     await edit_admin_message(call, '⚠️ Withdrawal Rejected')
-    await send_user_notification(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML)
+    asyncio.create_task(send_user_notification(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML))
 
 # ============================================
 # OPTIMIZED AUTO EXPIRE TASKS ENGINE
@@ -2577,14 +2602,13 @@ async def auto_expire_tasks():
                         await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', task_ids)
                         await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids)
 
-            # Send notifications AFTER DB connection is released
             for task_id, user_id in expired_tasks:
-                await send_user_notification(
+                asyncio.create_task(send_user_notification(
                     user_id, 
                     f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Task #{task_id} has expired after 30 minutes.\nThe task was returned to the pool.\n\nUse "Get Task" to get a new task.', 
                     reply_markup=get_main_menu_keyboard(), 
                     parse_mode=ParseMode.HTML
-                )
+                ))
         except Exception as e:
             print(f"Error in background task: {e}")
             
