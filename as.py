@@ -114,7 +114,14 @@ async def init_db():
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
         
-    db_pool = await asyncpg.create_pool(dsn=url, ssl='require', min_size=3, max_size=15)
+    db_pool = await asyncpg.create_pool(
+        dsn=url, 
+        ssl='require', 
+        min_size=3, 
+        max_size=15,
+        timeout=10.0,
+        command_timeout=10.0
+    )
     
     async with db_pool.acquire() as conn:
         await conn.execute('''
@@ -249,7 +256,7 @@ async def get_user_data(user_id: int):
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT balance, upi, usdt_address, notifications_enabled, currency, referred_by, referral_earnings FROM users WHERE user_id=$1", user_id)
         if row:
-            USER_CACHE[user_id] = row
+            USER_CACHE[user_id] = dict(row)
         return row
 
 async def get_balance(user_id: int) -> float:
@@ -261,9 +268,9 @@ async def is_banned(user_id: int) -> bool:
 
 async def send_user_notification(user_id: int, text: str, **kwargs):
     user_data = await get_user_data(user_id)
-    if user_data and user_data['notifications_enabled']:
+    if user_data and user_data.get('notifications_enabled', True):
         try:
-            await bot.send_message(user_id, text, **kwargs)
+            await asyncio.wait_for(bot.send_message(user_id, text, **kwargs), timeout=5.0)
         except Exception:
             pass
 
@@ -277,13 +284,15 @@ async def check_user_joined_channel(user_id: int) -> bool:
     if not MUST_JOIN_CHANNEL:
         return True
         
-    # Check in-memory channel membership cache (valid for 10 minutes)
     now = time.time()
     if user_id in JOINED_CACHE and (now - JOINED_CACHE[user_id]) < 600:
         return True
 
     try:
-        member = await bot.get_chat_member(chat_id=MUST_JOIN_CHANNEL, user_id=user_id)
+        member = await asyncio.wait_for(
+            bot.get_chat_member(chat_id=MUST_JOIN_CHANNEL, user_id=user_id),
+            timeout=5.0
+        )
         is_joined = member.status in ['creator', 'administrator', 'member']
         if is_joined:
             JOINED_CACHE[user_id] = now
@@ -443,7 +452,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
     usdt_link_text = "Change USDT BEP-20" if usdt_set else "Link USDT BEP-20"
     
     upi_emoji = "6278557702109013266" if upi_set else "5902449142575141204"
-    usdt_emoji = "5197434882321567830" if upi_set else "5902449142575141204"
+    usdt_emoji = "5197434882321567830" if usdt_set else "5902449142575141204"
 
     kb.button(text=upi_link_text, callback_data="link_upi", icon_custom_emoji_id=upi_emoji, style="primary")
     kb.button(text=usdt_link_text, callback_data="link_usdt", icon_custom_emoji_id=usdt_emoji, style="primary")
@@ -638,8 +647,8 @@ async def start(message: Message, state: FSMContext, command: CommandObject = No
         if is_new_user:
             text = (
                 '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome to Gmail Pay Bot!</b>\n\n'
-                '<tg-emoji emoji-id="5902206159095339799">👋</tg-emoji> <b>Default Currency Selected:</b> <code>USD ($)</code>\n'
-                '<tg-emoji emoji-id="5413683612342034207">👋</tg-emoji> <i>You can change your currency anytime in <b>Settings</b>.</i>\n\n'
+                '💵 <b>Default Currency Selected:</b> <code>USD ($)</code>\n'
+                '⚙️ <i>You can change your currency anytime in <b>Settings</b>.</i>\n\n'
                 'Choose an option from the menu below:'
             )
         else:
@@ -787,7 +796,7 @@ async def cb_toggle_notif(call: CallbackQuery):
 @dp.callback_query(F.data == "toggle_currency")
 async def cb_toggle_currency(call: CallbackQuery):
     user_data = await get_user_data(call.from_user.id)
-    current_curr = user_data['currency']
+    current_curr = (user_data['currency'] or 'USD').upper()
     new_curr = "INR" if current_curr == "USD" else "USD"
     
     async with db_pool.acquire() as conn:
@@ -2542,12 +2551,13 @@ async def reject_withdraw(call: CallbackQuery):
     await send_user_notification(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML)
 
 # ============================================
-# AUTO EXPIRE TASKS ENGINE
+# OPTIMIZED AUTO EXPIRE TASKS ENGINE
 # ============================================
 
 async def auto_expire_tasks():
     while True:
         try:
+            expired_tasks = []
             async with db_pool.acquire() as conn:
                 rows = await conn.fetch('''
                     SELECT ta.task_id, ta.user_id, ta.assigned_at 
@@ -2555,24 +2565,29 @@ async def auto_expire_tasks():
                     JOIN tasks t ON ta.task_id = t.id
                     WHERE t.status != 'pending_review'
                 ''')
+                
+                now = datetime.utcnow()
                 for r in rows:
-                    task_id = r['task_id']
-                    user_id = r['user_id']
-                    assigned_time = r['assigned_at']
-                    
-                    if datetime.utcnow() - assigned_time > timedelta(minutes=30):
-                        async with conn.transaction():
-                            await conn.execute('DELETE FROM task_assignments WHERE task_id=$1', task_id)
-                            await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
-                        
-                        await send_user_notification(
-                            user_id, 
-                            f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Task #{task_id} has expired after 30 minutes.\nThe task was returned to the pool.\n\nUse "Get Task" to get a new task.', 
-                            reply_markup=get_main_menu_keyboard(), 
-                            parse_mode=ParseMode.HTML
-                        )
+                    if now - r['assigned_at'] > timedelta(minutes=30):
+                        expired_tasks.append((r['task_id'], r['user_id']))
+
+                if expired_tasks:
+                    task_ids = [t[0] for t in expired_tasks]
+                    async with conn.transaction():
+                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', task_ids)
+                        await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids)
+
+            # Send notifications AFTER DB connection is released
+            for task_id, user_id in expired_tasks:
+                await send_user_notification(
+                    user_id, 
+                    f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Task #{task_id} has expired after 30 minutes.\nThe task was returned to the pool.\n\nUse "Get Task" to get a new task.', 
+                    reply_markup=get_main_menu_keyboard(), 
+                    parse_mode=ParseMode.HTML
+                )
         except Exception as e:
             print(f"Error in background task: {e}")
+            
         await asyncio.sleep(60)
 
 # ============================================
