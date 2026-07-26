@@ -120,7 +120,7 @@ async def init_db():
         min_size=3, 
         max_size=15,
         timeout=10.0,
-        command_timeout=10.0
+        command_timeout=10.0'
         statement_cache_size=0
     )
     
