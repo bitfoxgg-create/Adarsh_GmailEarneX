@@ -359,7 +359,7 @@ def get_main_menu_keyboard():
         text="Referrals",
         callback_data="menu_referrals",
         icon_custom_emoji_id="5391292736647209211",
-        style="primary"
+        style="success"  # Green Color
     )
     kb.button(
         text="My Accounts",
@@ -370,8 +370,7 @@ def get_main_menu_keyboard():
     kb.button(
         text="Settings",
         callback_data="menu_settings",
-        icon_custom_emoji_id="5893161718179173515",
-        style="primary"
+        icon_custom_emoji_id="5893161718179173515"  # White / Default Color
     )
     kb.button(
         text="Support",
@@ -1515,8 +1514,8 @@ async def process_sell_password(message: Message, state: FSMContext):
     )
 
     sent_msg = await message.answer(
-        '<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your account details have been sent for admin review.\n\n'
-        '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
+        f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your Gmail sell account details (Request #{sell_id}) have been sent for admin review.\n\n'
+        f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
         reply_markup=get_main_menu_keyboard(), 
         parse_mode=ParseMode.HTML
     )
@@ -2555,7 +2554,12 @@ async def handle_task_submission(message: Message, state: FSMContext):
         proof_text = f"\n\nProof: {message.text}"
         await bot.send_message(ADMIN_ID, admin_msg_text + proof_text, reply_markup=kb, parse_mode=ParseMode.HTML)
     
-    sent_msg = await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Submission sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+    sent_msg = await message.answer(
+        f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Task #{task_id} submission sent for admin review.\n\n'
+        f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
+        reply_markup=get_main_menu_keyboard(), 
+        parse_mode=ParseMode.HTML
+    )
     await state.clear()
     await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
@@ -2669,7 +2673,7 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
 
     asyncio.create_task(send_user_notification(
         user_id, 
-        f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}', 
+        f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request #{sell_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}', 
         parse_mode=ParseMode.HTML
     ))
 
@@ -2741,7 +2745,7 @@ async def approve_task(call: CallbackQuery):
     async def notify_user():
         user_data = await get_user_data(user_id)
         formatted_reward = format_currency(reward, user_data['currency'])
-        await send_user_notification(user_id, f"🎉 Task approved!\n+{formatted_reward} added to your balance.")
+        await send_user_notification(user_id, f"🎉 Task #{task_id} approved!\n+{formatted_reward} added to your balance.")
 
     asyncio.create_task(notify_user())
 
