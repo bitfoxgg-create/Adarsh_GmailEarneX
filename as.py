@@ -818,35 +818,49 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
     all_accounts = []
 
     for s in sells:
+        sell_id = s['id']
         try:
             email = s['details'].split("\n")[0].replace("Username: ", "").strip()
         except Exception:
-            email = s['details']
+            email = s['details'].strip()
+        
+        if "@gmail.com" not in email.lower():
+            email += "@gmail.com"
+
+        display_title = f"{email} #{sell_id}"
         
         status_raw = s['status']
         if status_raw == 'pending_review':
-            status_str = "🟡 Registration in progress"
+            status_str = "🟡 Waiting For Review"
         elif status_raw == 'approved':
             status_str = "🟢 Approved & Paid"
         else:
             status_str = "🔴 Declined / Rejected"
 
         all_accounts.append({
-            'email': email,
+            'title': display_title,
             'status': status_str,
             'date': s['created_at']
         })
 
     for t in tasks:
+        task_id = t['id']
         try:
             parts = t['details'].split(" | ")
             email = parts[0].replace("Email: ", "").strip()
         except Exception:
-            email = f"Task #{t['id']}"
+            email = f"Task"
+
+        if "@gmail.com" not in email.lower() and "@" in email:
+            pass
+        elif "@gmail.com" not in email.lower():
+            email += "@gmail.com"
+
+        display_title = f"{email} #{task_id}"
 
         status_raw = t['status']
         if status_raw == 'pending_review':
-            status_str = "🟡 Registration in progress"
+            status_str = "🟡 Waiting For Review"
         elif status_raw == 'assigned':
             status_str = "🔵 In Progress"
         elif status_raw == 'completed':
@@ -855,14 +869,14 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
             status_str = "🔴 Declined / Rejected"
 
         all_accounts.append({
-            'email': email,
+            'title': display_title,
             'status': status_str,
             'date': t['created_at']
         })
 
     for ct in completed_tasks:
         all_accounts.append({
-            'email': f"Completed {ct['details']}",
+            'title': f"Completed {ct['details']}",
             'status': "🟢 Approved & Paid",
             'date': ct['created_at']
         })
@@ -898,7 +912,7 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
         for item in page_items:
             date_fmt = item['date'].strftime("%b %d %I:%M %p")
             text += (
-                f"<code>{item['email']}</code>\n"
+                f"<code>{item['title']}</code>\n"
                 f"{item['status']}\n"
                 f"Created: {date_fmt}\n\n"
             )
@@ -1435,7 +1449,12 @@ async def sell(message: Message, state: FSMContext):
 
 @dp.message(UserState.selling_username, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_username(message: Message, state: FSMContext):
-    username = message.text.strip()
+    username_input = message.text.strip()
+    if "@gmail.com" not in username_input.lower() and "@" not in username_input:
+        username = f"{username_input}@gmail.com"
+    else:
+        username = username_input
+
     await state.update_data(sell_username=username)
     await state.set_state(UserState.selling_password)
     sent_msg = await message.answer(
@@ -1618,6 +1637,10 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
             lines = details.split("\n")
             username = lines[0].replace("Username: ", "").strip()
             password = lines[1].replace("Password: ", "").strip()
+            
+            if "@gmail.com" not in username.lower() and "@" not in username:
+                username += "@gmail.com"
+                
             formatted_details = f"📧 <b>Username:</b> <code>{username}</code>\n🔑 <b>Password:</b> <code>{password}</code>"
         except Exception:
             formatted_details = f"<code>{details}</code>"
