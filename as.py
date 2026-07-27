@@ -364,7 +364,7 @@ def get_main_menu_keyboard():
     kb.button(
         text="My Accounts",
         callback_data="menu_my_accounts",
-        icon_custom_emoji_id="5443128453412969371",
+        icon_custom_emoji_id="5445221832074483553",
         style="primary"  # Blue Color
     )
     kb.button(
@@ -824,7 +824,7 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
         except Exception:
             email = s['details'].strip()
         
-        if "@gmail.com" not in email.lower():
+        if "@gmail.com" not in email.lower() and "@" not in email:
             email += "@gmail.com"
 
         display_title = f"{email} #{sell_id}"
@@ -839,6 +839,7 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
 
         all_accounts.append({
             'title': display_title,
+            'type': 'Sell',
             'status': status_str,
             'date': s['created_at']
         })
@@ -851,9 +852,7 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
         except Exception:
             email = f"Task"
 
-        if "@gmail.com" not in email.lower() and "@" in email:
-            pass
-        elif "@gmail.com" not in email.lower():
+        if "@gmail.com" not in email.lower() and "@" not in email:
             email += "@gmail.com"
 
         display_title = f"{email} #{task_id}"
@@ -870,13 +869,24 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
 
         all_accounts.append({
             'title': display_title,
+            'type': 'Register',
             'status': status_str,
             'date': t['created_at']
         })
 
     for ct in completed_tasks:
+        note_text = ct['details'] or ""
+        task_id_str = ""
+        if "#" in note_text:
+            task_id_str = f" #{note_text.split('#')[-1]}"
+            
+        email_str = note_text.replace("Task #", "").split()[0] if "Task #" in note_text else "Task Account"
+        if "@gmail.com" not in email_str.lower() and "@" not in email_str and email_str.isalnum():
+            email_str += "@gmail.com"
+
         all_accounts.append({
-            'title': f"Completed {ct['details']}",
+            'title': f"{email_str}{task_id_str}",
+            'type': 'Register',
             'status': "🟢 Approved & Paid",
             'date': ct['created_at']
         })
@@ -899,20 +909,21 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
 
     if total_items == 0:
         text = (
-            "📁 <b>My Accounts</b>\n\n"
+            '<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>My Accounts</b>\n\n'
             "📭 You haven't submitted any Gmail accounts yet."
         )
     else:
         text = (
-            f"📁 <b>My Accounts</b>\n"
-            f"You have <b>{total_items}</b> submitted Gmail accounts.\n"
-            f"Showing <b>{start_idx + 1}-{end_idx}</b> of <b>{total_items}</b>.\n\n"
+            f'<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>My Accounts</b>\n'
+            f'You have <b>{total_items}</b> submitted Gmail accounts.\n'
+            f'Showing <b>{start_idx + 1}-{end_idx}</b> of <b>{total_items}</b>.\n\n'
         )
 
         for item in page_items:
             date_fmt = item['date'].strftime("%b %d %I:%M %p")
             text += (
                 f"<code>{item['title']}</code>\n"
+                f"📌 <b>Type:</b> {item['type']}\n"
                 f"{item['status']}\n"
                 f"Created: {date_fmt}\n\n"
             )
@@ -1338,8 +1349,11 @@ async def get_task(message: Message, state: FSMContext):
             task_status = existing['status']
             
             if task_status == 'pending_review':
-                sent_msg = await message.answer('<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Your task submission is currently under admin review. Please wait for approval.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
-                await state.update_data(last_menu_msg_id=sent_msg.message_id)
+                txt = '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Your task submission is currently under admin review. Please wait for approval.'
+                try:
+                    await message.answer(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+                except:
+                    pass
                 return
 
             expire_time = assigned_time + timedelta(minutes=30)
@@ -1486,11 +1500,11 @@ async def process_sell_password(message: Message, state: FSMContext):
     ]])
 
     admin_message_text = (
-        f"📨 <b>New Gmail Sell Request #{sell_id}</b>\n\n"
-        f"👤 <b>Seller:</b> @{message.from_user.username} (<code>{user_id}</code>)\n"
-        f"📧 <b>Username:</b> <code>{username}</code>\n"
-        f"🔑 <b>Password:</b> <code>{password}</code>\n"
-        f"💰 <b>Payout Rate:</b> ₹{rate:.2f}"
+        f'<tg-emoji emoji-id="5377548235709619284">📨</tg-emoji> <b>New Gmail Sell Request #{sell_id}</b>\n\n'
+        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Seller:</b> @{message.from_user.username} (<code>{user_id}</code>)\n'
+        f'📧 <b>Username:</b> <code>{username}</code>\n'
+        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Payout Rate:</b> ₹{rate:.2f}'
     )
 
     await bot.send_message(
@@ -1617,11 +1631,11 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
         ]])
         
         await message.answer(
-            f'📤 <b>Pending Task Submission</b>\n\n'
-            f'👤 <b>User ID:</b> <code>{user_id}</code>\n'
+            f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>Pending Task Submission</b>\n\n'
+            f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>User ID:</b> <code>{user_id}</code>\n'
             f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <b>Task #{task_id}</b>\n'
             f'📧 <b>Email:</b> <code>{email}</code>\n'
-            f'🔑 <b>Password:</b> <code>{password}</code>\n'
+            f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
             f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}',
             reply_markup=kb,
             parse_mode=ParseMode.HTML
@@ -1641,7 +1655,7 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
             if "@gmail.com" not in username.lower() and "@" not in username:
                 username += "@gmail.com"
                 
-            formatted_details = f"📧 <b>Username:</b> <code>{username}</code>\n🔑 <b>Password:</b> <code>{password}</code>"
+            formatted_details = f"📧 <b>Username:</b> <code>{username}</code>\n<tg-emoji emoji-id=\"6005570495603282482\">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>"
         except Exception:
             formatted_details = f"<code>{details}</code>"
 
@@ -1651,8 +1665,8 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
         ]])
 
         await message.answer(
-            f'📦 <b>Pending Gmail Sell Request #{sell_id}</b>\n\n'
-            f'👤 <b>User ID:</b> <code>{user_id}</code>\n'
+            f'<tg-emoji emoji-id="5377548235709619284">📦</tg-emoji> <b>Pending Gmail Sell Request #{sell_id}</b>\n\n'
+            f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>User ID:</b> <code>{user_id}</code>\n'
             f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Rate:</b> ₹{amount:.2f}\n\n'
             f'📝 <b>Details:</b>\n{formatted_details}',
             reply_markup=kb,
@@ -2528,12 +2542,11 @@ async def handle_task_submission(message: Message, state: FSMContext):
     ]])
 
     admin_msg_text = (
-        f'📤 <b>Task Submission #{task_id}</b>\n\n'
-        f'👤 User: @{message.from_user.username} (<code>{user_id}</code>)\n'
-        f'Login to <code>{email}</code>\n'
+        f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>Task Submission #{task_id}</b>\n\n'
+        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>User:</b> @{message.from_user.username} (<code>{user_id}</code>)\n'
         f'📧 <b>Email:</b> <code>{email}</code>\n'
-        f'🔑 <b>Password:</b> <code>{password}</code>\n'
-        f'💰 Reward: ₹{reward}'
+        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}'
     )
 
     if message.photo:
@@ -2686,11 +2699,18 @@ async def approve_task(call: CallbackQuery):
         assigned_user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
         user_id = assigned_user_id if assigned_user_id else int(callback_user_id)
 
+        # Get task email to record in transaction note
+        task_details = await conn.fetchval("SELECT details FROM tasks WHERE id=$1", task_id)
+        try:
+            task_email = task_details.split(" | ")[0].replace("Email: ", "").strip()
+        except Exception:
+            task_email = f"Task Account"
+
         await ensure_user(user_id, conn=conn)
 
         async with conn.transaction():
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", reward, user_id)
-            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "task", reward, f"Task #{task_id}")
+            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "task", reward, f"{task_email} #{task_id}")
             await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
             await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)
 
