@@ -475,7 +475,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
     usdt_link_text = "Change USDT BEP-20" if usdt_set else "Link USDT BEP-20"
     
     upi_emoji = "6278557702109013266" if upi_set else "5902449142575141204"
-    usdt_emoji = "5197434882321567830" if usdt_set else "5902449142575141204"
+    usdt_emoji = "5197434882321567830" if upi_set else "5902449142575141204"
 
     kb.button(text=upi_link_text, callback_data="link_upi", icon_custom_emoji_id=upi_emoji, style="primary")
     kb.button(text=usdt_link_text, callback_data="link_usdt", icon_custom_emoji_id=usdt_emoji, style="primary")
@@ -1468,6 +1468,29 @@ async def process_sell_username(message: Message, state: FSMContext):
     else:
         username = username_input
 
+    search_pattern = f"%{username.lower()}%"
+
+    async with db_pool.acquire() as conn:
+        # Check duplicate in pending_sells
+        existing_sell = await conn.fetchval(
+            "SELECT id FROM pending_sells WHERE LOWER(details) LIKE $1",
+            search_pattern
+        )
+        # Check duplicate in tasks
+        existing_task = await conn.fetchval(
+            "SELECT id FROM tasks WHERE LOWER(title) LIKE $1 OR LOWER(details) LIKE $1",
+            search_pattern
+        )
+
+    if existing_sell or existing_task:
+        await message.answer(
+            "❌ <b>This email is already in the database. You cannot sell the same email twice.</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        await state.clear()
+        return
+
     await state.update_data(sell_username=username)
     await state.set_state(UserState.selling_password)
     sent_msg = await message.answer(
@@ -1578,6 +1601,99 @@ async def admin_btn_add_task(message: Message, state: FSMContext):
         return
     await state.set_state(AdminState.waiting_for_add_task)
     await message.answer("📧 Send the email/username to add as a task (e.g. `example@gmail.com`):", parse_mode=ParseMode.MARKDOWN)
+
+@dp.message(AdminState.waiting_for_add_task, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_add_task_step(message: Message, state: FSMContext):
+    username_input = message.text.strip()
+    username = f"{username_input}@gmail.com" if "@" not in username_input else username_input
+    
+    search_pattern = f"%{username.lower()}%"
+
+    async with db_pool.acquire() as conn:
+        existing_task = await conn.fetchrow(
+            "SELECT id, status FROM tasks WHERE LOWER(title) LIKE $1 OR LOWER(details) LIKE $1 LIMIT 1",
+            search_pattern
+        )
+
+    if existing_task:
+        await state.update_data(pending_add_username=username)
+        kb = InlineKeyboardBuilder()
+        kb.button(
+            text="Confirm", 
+            callback_data="confirm_add_duplicate_task", 
+            icon_custom_emoji_id="6217663806110175239", 
+            style="success"
+        )
+        kb.button(
+            text="Back", 
+            callback_data="cancel_add_duplicate_task", 
+            icon_custom_emoji_id="6039539366177541657", 
+            style="danger"
+        )
+        kb.adjust(2)
+
+        await message.answer(
+            f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>This task (<code>{username}</code>) already exists in database!</b>\n\n'
+            f'Would you like to add it anyway?',
+            parse_mode=ParseMode.HTML,
+            reply_markup=kb.as_markup()
+        )
+        return
+
+    # Add task directly if no duplicate
+    await insert_new_task(message, username)
+    await state.clear()
+
+async def insert_new_task(message: Message, username: str):
+    password = "TaskVerse@#"
+    default_reward = 50.0 
+    title = f"Login to {username}"
+    details = f"Email: {username} | Pass: {password}"
+    
+    async with db_pool.acquire() as conn:
+        task_id = await conn.fetchval(
+            "INSERT INTO tasks (title, details, reward) VALUES ($1, $2, $3) RETURNING id",
+            title, details, default_reward
+        )
+        
+    await message.answer(
+        f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> <b>Task Added Successfully!</b>\n\n'
+        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <b>Task ID:</b> <code>#{task_id}</code>\n'
+        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> <code>{username}</code>\n'
+        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{default_reward}', 
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_admin_menu_keyboard()
+    )
+
+@dp.callback_query(F.data == "confirm_add_duplicate_task")
+async def cb_confirm_add_duplicate_task(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    username = data.get("pending_add_username")
+    if username:
+        try:
+            await call.message.delete()
+        except Exception:
+            pass
+        await insert_new_task(call.message, username)
+    await state.clear()
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
+@dp.callback_query(F.data == "cancel_add_duplicate_task")
+async def cb_cancel_add_duplicate_task(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    try:
+        await call.message.edit_text("❌ Task addition cancelled.", reply_markup=None)
+    except Exception:
+        pass
+    await call.message.answer("🏠 Returned to Admin Menu.", reply_markup=get_admin_menu_keyboard())
+    try:
+        await call.answer()
+    except Exception:
+        pass
 
 @dp.message(F.text == "📥 Pending Reviews", StateFilter("*"))
 async def admin_btn_pending_reviews(message: Message, state: FSMContext):
@@ -1857,9 +1973,11 @@ async def admin_btn_view_stats(message: Message, state: FSMContext):
         avail_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='available'")
         assigned_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='assigned'")
         pending_review_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='pending_review'")
-        pending_sells = await conn.fetchval("SELECT COUNT(*) FROM pending_sells WHERE status='pending_review'")
-        pending_withdrawals = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status='pending'")
         completed_tasks = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='completed'")
+        
+        pending_sells = await conn.fetchval("SELECT COUNT(*) FROM pending_sells WHERE status='pending_review'")
+        completed_sells = await conn.fetchval("SELECT COUNT(*) FROM pending_sells WHERE status='approved'")
+        pending_withdrawals = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status='pending'")
 
     total_pending = (pending_review_tasks or 0) + (pending_sells or 0)
 
@@ -1867,11 +1985,12 @@ async def admin_btn_view_stats(message: Message, state: FSMContext):
         f"📊 <b>Bot Task & User Statistics</b>\n\n"
         f"👥 <b>Total Users (started bot):</b> <code>{total_users}</code>\n\n"
         f"📋 <b>Total Tasks Added:</b> <code>{total_tasks}</code>\n"
-        f"🟢 <b>Available (Unassigned Pool):</b> <code>{avail_tasks}</code>\n"
-        f"💼 <b>Assigned (Active with Users):</b> <code>{assigned_tasks}</code>\n"
+        f"🟢 <b>Available Tasks Pool:</b> <code>{avail_tasks}</code>\n"
+        f"💼 <b>Assigned Tasks:</b> <code>{assigned_tasks}</code>\n"
         f"⏳ <b>Pending Review (Tasks + Sells):</b> <code>{total_pending}</code>\n"
-        f"💸 <b>Pending Withdrawals:</b> <code>{pending_withdrawals or 0}</code>\n"
-        f"✅ <b>Completed (Approved):</b> <code>{completed_tasks}</code>"
+        f"✅ <b>Completed Tasks:</b> <code>{completed_tasks or 0}</code>\n"
+        f"📦 <b>Completed Sell Gmail:</b> <code>{completed_sells or 0}</code>\n"
+        f"💸 <b>Pending Withdrawals:</b> <code>{pending_withdrawals or 0}</code>"
     )
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
 
@@ -2050,32 +2169,6 @@ async def process_chat_message_step(message: Message, state: FSMContext):
     except Exception as e:
         await message.answer(f"❌ Failed to send message to User `{target_id}`.\n\nError: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
 
-    await state.clear()
-
-@dp.message(AdminState.waiting_for_add_task, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def process_add_task_step(message: Message, state: FSMContext):
-    username_input = message.text.strip()
-    username = f"{username_input}@gmail.com" if "@" not in username_input else username_input
-    password = "TaskVerse@#"
-    default_reward = 50.0 
-    title = f"Login to {username}"
-    details = f"Email: {username} | Pass: {password}"
-    
-    async with db_pool.acquire() as conn:
-        task_id = await conn.fetchval(
-            "INSERT INTO tasks (title, details, reward) VALUES ($1, $2, $3) RETURNING id",
-            title, details, default_reward
-        )
-        
-    await message.answer(
-        f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> <b>Task Added Successfully!</b>\n\n'
-        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <b>Task ID:</b> <code>#{task_id}</code>\n'
-        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> <code>{username}</code>\n'
-        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{default_reward}', 
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_admin_menu_keyboard()
-    )
     await state.clear()
 
 @dp.message(AdminState.waiting_for_add_balance, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
