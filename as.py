@@ -41,6 +41,7 @@ db_pool = None
 BANNED_USERS_CACHE = set()
 MUST_JOIN_CHANNEL = None
 BOT_USERNAME = "Gmailpaybot"
+BOT_STATUS = True  # True = ON, False = OFF
 
 # IN-MEMORY SPEED CACHES
 JOINED_CACHE = {}     # {user_id: timestamp_joined}
@@ -52,7 +53,7 @@ MENU_BUTTONS = {
     "➕ Add Task", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
-    "📢 Must Join Channel"
+    "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON"
 }
 
 # ============================================
@@ -207,13 +208,16 @@ async def init_db():
         ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id FROM banned_users")
         BANNED_USERS_CACHE = {r['user_id'] for r in rows}
         
         channel_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='must_join_channel'")
         MUST_JOIN_CHANNEL = channel_val if channel_val else None
+
+        status_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='bot_status'")
+        BOT_STATUS = (status_val != 'off')
 
     try:
         me = await bot.get_me()
@@ -230,7 +234,6 @@ def invalidate_user_cache(user_id: int):
     USER_CACHE.pop(user_id, None)
 
 async def ensure_user(user_id: int, referrer_id: int = None, conn=None) -> bool:
-    """Returns True if a new user was created, False if user already exists."""
     is_new = False
     
     async def _run_ensure(c):
@@ -417,6 +420,8 @@ def get_settings_keyboard(notif_enabled: bool, currency: str):
 
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
+    status_btn_text = "🟢 Bot Status: ON" if BOT_STATUS else "🔴 Bot Status: OFF"
+    kb.button(text=status_btn_text, style="danger" if BOT_STATUS else "success")
     kb.button(text="➕ Add Task", style="success")
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💸 Pending Withdrawals", style="primary")
@@ -436,7 +441,7 @@ def get_admin_menu_keyboard():
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_unassign_inline_keyboard():
@@ -540,7 +545,7 @@ async def edit_admin_message(call: CallbackQuery, additional_text: str):
         print(f"Error editing admin message: {e}")
 
 # ============================================
-# GLOBAL BAN & MUST-JOIN MIDDLEWARES
+# GLOBAL BAN, BOT STATUS & MUST-JOIN MIDDLEWARES
 # ============================================
 
 @dp.message.outer_middleware()
@@ -553,6 +558,10 @@ async def global_message_middleware(handler, event: Message, data):
     if user_id == ADMIN_ID:
         return await handler(event, data)
         
+    if not BOT_STATUS:
+        await event.answer("⚠️ Bot is Currently Off, Wait For Admin To On The Bot")
+        return
+
     if await is_banned(user_id):
         await event.answer("🚫 You are banned from using this bot.")
         return
@@ -578,6 +587,13 @@ async def global_callback_middleware(handler, event: CallbackQuery, data):
     if user_id == ADMIN_ID:
         return await handler(event, data)
         
+    if not BOT_STATUS:
+        try:
+            await event.answer("⚠️ Bot is Currently Off, Wait For Admin To On The Bot", show_alert=True)
+        except Exception:
+            pass
+        return
+
     if await is_banned(user_id):
         try:
             await event.answer("🚫 You are banned from using this bot.", show_alert=True)
@@ -634,8 +650,7 @@ async def user_left_channel(event: ChatMemberUpdated):
 # START & GLOBAL CANCEL
 # ============================================
 
-@dp.message(CommandStart(), StateFilter("*"))
-@dp.message(Command("start"), StateFilter("*"))
+@dp.message(CommandStart())
 async def start(message: Message, state: FSMContext, command: CommandObject = None):
     try:
         data = await state.get_data()
@@ -1332,6 +1347,20 @@ async def open_admin_panel(message: Message, state: FSMContext):
         reply_markup=get_admin_menu_keyboard()
     )
 
+@dp.message(F.text.in_({"🔴 Bot Status: OFF", "🟢 Bot Status: ON"}), StateFilter("*"))
+async def admin_btn_toggle_status(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    global BOT_STATUS
+    BOT_STATUS = not BOT_STATUS
+    new_val = 'on' if BOT_STATUS else 'off'
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('bot_status', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
+
+    status_str = "🟢 <b>Bot is now ONLINE and ENABLED for all users!</b>" if BOT_STATUS else "🔴 <b>Bot is now OFF and DISABLED for normal users!</b>"
+    await message.answer(status_str, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+
 @dp.message(F.text == "➕ Add Task", StateFilter("*"))
 async def admin_btn_add_task(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -1347,7 +1376,7 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
         
     async with db_pool.acquire() as conn:
         task_rows = await conn.fetch('''
-            SELECT t.id, t.title, t.reward, ta.user_id 
+            SELECT t.id, t.title, t.details, t.reward, ta.user_id 
             FROM tasks t 
             JOIN task_assignments ta ON t.id = ta.task_id 
             WHERE t.status = 'pending_review'
@@ -1374,6 +1403,15 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
         title = r['title']
         reward = r['reward']
         user_id = r['user_id']
+        details = r['details']
+
+        try:
+            parts = details.split(" | ")
+            email = parts[0].replace("Email: ", "").strip()
+            password = parts[1].replace("Pass: ", "").strip()
+        except Exception:
+            email = title.replace("Login to ", "").strip()
+            password = "TaskVerse@#"
         
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text='Approve', callback_data=f'taskapprove:{task_id}:{user_id}:{reward}', icon_custom_emoji_id="6217663806110175239", style="success"),
@@ -1384,7 +1422,8 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
             f'📤 <b>Pending Task Submission</b>\n\n'
             f'👤 <b>User ID:</b> <code>{user_id}</code>\n'
             f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <b>Task #{task_id}</b>\n'
-            f'📌 <b>Title:</b> {title}\n'
+            f'📧 <b>Email:</b> <code>{email}</code>\n'
+            f'🔑 <b>Password:</b> <code>{password}</code>\n'
             f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}',
             reply_markup=kb,
             parse_mode=ParseMode.HTML
@@ -2250,7 +2289,7 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
 async def handle_task_submission(message: Message, state: FSMContext):
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
-        task = await conn.fetchrow('SELECT t.id, t.title, t.reward FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
+        task = await conn.fetchrow('SELECT t.id, t.title, t.details, t.reward FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
     if not task:
         await state.clear()
         sent_msg = await message.answer('❌ No active task found.', reply_markup=get_main_menu_keyboard())
@@ -2259,7 +2298,16 @@ async def handle_task_submission(message: Message, state: FSMContext):
     
     task_id = task['id']
     title = task['title']
+    details = task['details']
     reward = task['reward']
+
+    try:
+        parts = details.split(" | ")
+        email = parts[0].replace("Email: ", "").strip()
+        password = parts[1].replace("Pass: ", "").strip()
+    except Exception:
+        email = title.replace("Login to ", "").strip()
+        password = "TaskVerse@#"
     
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
@@ -2268,10 +2316,21 @@ async def handle_task_submission(message: Message, state: FSMContext):
         InlineKeyboardButton(text='Approve', callback_data=f'taskapprove:{task_id}:{user_id}:{reward}', icon_custom_emoji_id="6217663806110175239", style="success"),
         InlineKeyboardButton(text='Decline', callback_data=f'taskdecline:{task_id}:{user_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
     ]])
+
+    admin_msg_text = (
+        f'📤 <b>Task Submission #{task_id}</b>\n\n'
+        f'👤 User: @{message.from_user.username} (<code>{user_id}</code>)\n'
+        f'Login to <code>{email}</code>\n'
+        f'📧 <b>Email:</b> <code>{email}</code>\n'
+        f'🔑 <b>Password:</b> <code>{password}</code>\n'
+        f'💰 Reward: ₹{reward}'
+    )
+
     if message.photo:
-        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}', reply_markup=kb, parse_mode=ParseMode.HTML)
+        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_msg_text, reply_markup=kb, parse_mode=ParseMode.HTML)
     else:
-        await bot.send_message(ADMIN_ID, f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> <b>Task Submission</b>\n\n👤 User: @{message.from_user.username}\n<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> Task #{task_id}\n📌 {title}\n<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Reward: ₹{reward}\n\nProof: {message.text}', reply_markup=kb, parse_mode=ParseMode.HTML)
+        proof_text = f"\n\nProof: {message.text}"
+        await bot.send_message(ADMIN_ID, admin_msg_text + proof_text, reply_markup=kb, parse_mode=ParseMode.HTML)
     
     sent_msg = await message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Submission sent for admin review.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.clear()
