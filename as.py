@@ -420,8 +420,6 @@ def get_settings_keyboard(notif_enabled: bool, currency: str):
 
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
-    status_btn_text = "🟢 Bot Status: ON" if BOT_STATUS else "🔴 Bot Status: OFF"
-    kb.button(text=status_btn_text, style="danger" if BOT_STATUS else "success")
     kb.button(text="➕ Add Task", style="success")
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💸 Pending Withdrawals", style="primary")
@@ -440,8 +438,13 @@ def get_admin_menu_keyboard():
     kb.button(text="💳 Transactions", style="primary")
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
+    
+    # Bot Status button in last row right above Main Menu
+    status_btn_text = "🟢 Bot Status: ON" if BOT_STATUS else "🔴 Bot Status: OFF"
+    kb.button(text=status_btn_text, style="danger" if BOT_STATUS else "success")
+    
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_unassign_inline_keyboard():
@@ -1435,6 +1438,14 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
         details = r['details']
         amount = r['amount']
 
+        try:
+            lines = details.split("\n")
+            username = lines[0].replace("Username: ", "").strip()
+            password = lines[1].replace("Password: ", "").strip()
+            formatted_details = f"📧 <b>Username:</b> <code>{username}</code>\n🔑 <b>Password:</b> <code>{password}</code>"
+        except Exception:
+            formatted_details = f"<code>{details}</code>"
+
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="Approve", callback_data=f"sellapprove_db:{sell_id}:{user_id}:{amount}", icon_custom_emoji_id="6217663806110175239", style="success"),
             InlineKeyboardButton(text="Decline", callback_data=f"selldecline_db:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
@@ -1444,7 +1455,7 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
             f'📦 <b>Pending Gmail Sell Request #{sell_id}</b>\n\n'
             f'👤 <b>User ID:</b> <code>{user_id}</code>\n'
             f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Rate:</b> ₹{amount:.2f}\n\n'
-            f'📝 <b>Details:</b>\n{details}',
+            f'📝 <b>Details:</b>\n{formatted_details}',
             reply_markup=kb,
             parse_mode=ParseMode.HTML
         )
