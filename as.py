@@ -49,7 +49,7 @@ USER_CACHE = {}       # {user_id: dict_data}
 
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
-    "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "👥 Referrals", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
+    "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "👥 Referrals", "📁 My Accounts", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
     "➕ Add Task", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
@@ -362,6 +362,12 @@ def get_main_menu_keyboard():
         style="primary"
     )
     kb.button(
+        text="My Accounts",
+        callback_data="menu_my_accounts",
+        icon_custom_emoji_id="5443128453412969371",
+        style="primary"  # Blue Color
+    )
+    kb.button(
         text="Settings",
         callback_data="menu_settings",
         icon_custom_emoji_id="5893161718179173515",
@@ -373,7 +379,7 @@ def get_main_menu_keyboard():
         icon_custom_emoji_id="5274099962655816924",
         style="danger"
     )
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 def get_referral_inline_keyboard(user_id: int):
@@ -774,6 +780,176 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
     except:
         await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_referral_inline_keyboard(user_id))
     await state.update_data(last_menu_msg_id=call.message.message_id)
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
+# ============================================
+# MY ACCOUNTS PAGINATED SYSTEM
+# ============================================
+
+async def render_my_accounts_page(user_id: int, page: int = 1):
+    items_per_page = 5
+
+    async with db_pool.acquire() as conn:
+        # Fetch pending sells
+        sells = await conn.fetch('''
+            SELECT id, details, status, created_at 
+            FROM pending_sells 
+            WHERE user_id=$1 
+        ''', user_id)
+
+        # Fetch assigned/submitted tasks
+        tasks = await conn.fetch('''
+            SELECT t.id, t.details, t.status, ta.assigned_at as created_at 
+            FROM task_assignments ta
+            JOIN tasks t ON ta.task_id = t.id
+            WHERE ta.user_id=$1
+        ''', user_id)
+
+        # Fetch completed tasks from transaction logs
+        completed_tasks = await conn.fetch('''
+            SELECT tr.id, tr.note as details, 'completed' as status, tr.created_at 
+            FROM transactions tr 
+            WHERE tr.user_id=$1 AND tr.type='task'
+        ''', user_id)
+
+    all_accounts = []
+
+    for s in sells:
+        try:
+            email = s['details'].split("\n")[0].replace("Username: ", "").strip()
+        except Exception:
+            email = s['details']
+        
+        status_raw = s['status']
+        if status_raw == 'pending_review':
+            status_str = "🟡 Registration in progress"
+        elif status_raw == 'approved':
+            status_str = "🟢 Approved & Paid"
+        else:
+            status_str = "🔴 Declined / Rejected"
+
+        all_accounts.append({
+            'email': email,
+            'status': status_str,
+            'date': s['created_at']
+        })
+
+    for t in tasks:
+        try:
+            parts = t['details'].split(" | ")
+            email = parts[0].replace("Email: ", "").strip()
+        except Exception:
+            email = f"Task #{t['id']}"
+
+        status_raw = t['status']
+        if status_raw == 'pending_review':
+            status_str = "🟡 Registration in progress"
+        elif status_raw == 'assigned':
+            status_str = "🔵 In Progress"
+        elif status_raw == 'completed':
+            status_str = "🟢 Approved & Paid"
+        else:
+            status_str = "🔴 Declined / Rejected"
+
+        all_accounts.append({
+            'email': email,
+            'status': status_str,
+            'date': t['created_at']
+        })
+
+    for ct in completed_tasks:
+        all_accounts.append({
+            'email': f"Completed {ct['details']}",
+            'status': "🟢 Approved & Paid",
+            'date': ct['created_at']
+        })
+
+    # Sort newest first
+    all_accounts.sort(key=lambda x: x['date'], reverse=True)
+
+    total_items = len(all_accounts)
+    total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
+
+    if page < 1:
+        page = 1
+    elif page > total_pages:
+        page = total_pages
+
+    start_idx = (page - 1) * items_per_page
+    end_idx = min(start_idx + items_per_page, total_items)
+
+    page_items = all_accounts[start_idx:end_idx]
+
+    if total_items == 0:
+        text = (
+            "📁 <b>My Accounts</b>\n\n"
+            "📭 You haven't submitted any Gmail accounts yet."
+        )
+    else:
+        text = (
+            f"📁 <b>My Accounts</b>\n"
+            f"You have <b>{total_items}</b> submitted Gmail accounts.\n"
+            f"Showing <b>{start_idx + 1}-{end_idx}</b> of <b>{total_items}</b>.\n\n"
+        )
+
+        for item in page_items:
+            date_fmt = item['date'].strftime("%b %d %I:%M %p")
+            text += (
+                f"<code>{item['email']}</code>\n"
+                f"{item['status']}\n"
+                f"Created: {date_fmt}\n\n"
+            )
+
+    kb = InlineKeyboardBuilder()
+
+    if total_pages > 1:
+        nav_buttons = []
+        if page > 1:
+            nav_buttons.append(InlineKeyboardButton(text="<- Prev", callback_data=f"myacc_page:{page - 1}"))
+        
+        nav_buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+        
+        if page < total_pages:
+            nav_buttons.append(InlineKeyboardButton(text="Next ->", callback_data=f"myacc_page:{page + 1}"))
+        
+        kb.row(*nav_buttons)
+
+    kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back", icon_custom_emoji_id="6039539366177541657"))
+
+    return text, kb.as_markup()
+
+@dp.callback_query(F.data == "menu_my_accounts")
+async def cb_my_accounts(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    text, reply_markup = await render_my_accounts_page(call.from_user.id, page=1)
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+    except Exception:
+        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+    await state.update_data(last_menu_msg_id=call.message.message_id)
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
+@dp.callback_query(F.data.startswith("myacc_page:"))
+async def cb_my_accounts_page(call: CallbackQuery):
+    page = int(call.data.split(":")[1])
+    text, reply_markup = await render_my_accounts_page(call.from_user.id, page=page)
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+    except Exception:
+        pass
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
+@dp.callback_query(F.data == "noop")
+async def cb_noop(call: CallbackQuery):
     try:
         await call.answer()
     except Exception:
