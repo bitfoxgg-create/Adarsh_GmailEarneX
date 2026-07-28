@@ -4,7 +4,9 @@ import os
 from threading import Thread
 import urllib.parse
 import time
+import re
 from flask import Flask
+import aiohttp
 
 import asyncpg
 from aiogram import Bot, Dispatcher, F
@@ -30,6 +32,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
 DATABASE_URL = os.environ.get('DATABASE_URL')
+GMAIL_API_KEY = os.environ.get('GMAIL_API_KEY', 'AIzaSyA4b07BywG2SiDblbXfthI_d4K8wFZepgw')
 
 # Currency Conversion Rate (1 USD/USDT = 96.30 INR)
 USD_TO_INR = 96.30
@@ -55,6 +58,47 @@ MENU_BUTTONS = {
     "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON"
 }
+
+# ============================================
+# GMAIL VALIDATOR UTILITY
+# ============================================
+
+async def is_gmail_registered(email: str) -> bool:
+    """Verifies whether a Gmail account exists on Google servers."""
+    email = email.strip().lower()
+    
+    # 1. Basic Format Validation
+    pattern = r'^[a-zA-Z0-9.\_]+@gmail\.com$'
+    if not re.match(pattern, email):
+        return False
+
+    username = email.replace("@gmail.com", "")
+    
+    # 2. Check existence via Google Account Lookup Endpoint
+    url = "https://accounts.google.com/_/signin/v2/lookup/accountlookup"
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Google-Accounts-XSRF": "1"
+    }
+    data = f"f.req=%5B%22{username}%22%2C%22%22%2C%5B%5D%2Cnull%2C%22IN%22%2Cnull%2Cnull%2C2%2C1%2C%5Bnull%2Cnull%2Cnull%2Cnull%2Cnull%2C%5B%5D%2Cnull%2Cnull%2Cnull%5D%2C1%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2C0%5D"
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, data=data, timeout=aiox_timeout if 'aiox_timeout' in locals() else 5.0) as resp:
+                text = await resp.text()
+                # If Google returns account details or password prompt, the user exists
+                if "INCORRECT_PASSWORD" in text or "PASSWORD_AUTH" in text or "IDENTIFIER_EXISTS" in text or username in text:
+                    return True
+                # If identifier doesn't exist
+                if "ACCOUNT_NOT_FOUND" in text or "BOOM" in text:
+                    return False
+    except Exception as e:
+        print(f"Gmail validation lookup error: {e}")
+        # Default to True in case of network timeout so legitimate users aren't blocked
+        return True
+
+    return True
 
 # ============================================
 # DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
@@ -359,18 +403,18 @@ def get_main_menu_keyboard():
         text="Referrals",
         callback_data="menu_referrals",
         icon_custom_emoji_id="5391292736647209211",
-        style="success"  # Green Color
+        style="success"
     )
     kb.button(
         text="My Accounts",
         callback_data="menu_my_accounts",
         icon_custom_emoji_id="5445221832074483553",
-        style="primary"  # Blue Color
+        style="primary"
     )
     kb.button(
         text="Settings",
         callback_data="menu_settings",
-        icon_custom_emoji_id="5893161718179173515"  # White / Default Color
+        icon_custom_emoji_id="5893161718179173515"
     )
     kb.button(
         text="Support",
@@ -444,7 +488,6 @@ def get_admin_menu_keyboard():
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
     
-    # Bot Status button in last row right above Main Menu
     status_btn_text = "🟢 Bot Status: ON" if BOT_STATUS else "🔴 Bot Status: OFF"
     kb.button(text=status_btn_text, style="danger" if BOT_STATUS else "success")
     
@@ -475,7 +518,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
     usdt_link_text = "Change USDT BEP-20" if usdt_set else "Link USDT BEP-20"
     
     upi_emoji = "6278557702109013266" if upi_set else "5902449142575141204"
-    usdt_emoji = "5197434882321567830" if upi_set else "5902449142575141204"
+    usdt_emoji = "5197434882321567830" if usdt_set else "5902449142575141204"
 
     kb.button(text=upi_link_text, callback_data="link_upi", icon_custom_emoji_id=upi_emoji, style="primary")
     kb.button(text=usdt_link_text, callback_data="link_usdt", icon_custom_emoji_id=usdt_emoji, style="primary")
@@ -792,14 +835,12 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
     items_per_page = 5
 
     async with db_pool.acquire() as conn:
-        # Fetch pending sells
         sells = await conn.fetch('''
             SELECT id, details, status, created_at 
             FROM pending_sells 
             WHERE user_id=$1 
         ''', user_id)
 
-        # Fetch assigned/submitted tasks
         tasks = await conn.fetch('''
             SELECT t.id, t.details, t.status, ta.assigned_at as created_at 
             FROM task_assignments ta
@@ -807,7 +848,6 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
             WHERE ta.user_id=$1
         ''', user_id)
 
-        # Fetch completed tasks from transaction logs
         completed_tasks = await conn.fetch('''
             SELECT tr.id, tr.note as details, 'completed' as status, tr.created_at 
             FROM transactions tr 
@@ -890,7 +930,6 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
             'date': ct['created_at']
         })
 
-    # Sort newest first
     all_accounts.sort(key=lambda x: x['date'], reverse=True)
 
     total_items = len(all_accounts)
@@ -1468,15 +1507,25 @@ async def process_sell_username(message: Message, state: FSMContext):
     else:
         username = username_input
 
+    # Gmail Validation Check
+    is_valid = await is_gmail_registered(username)
+    if not is_valid:
+        await message.answer(
+            f"❌ <b>This Gmail account (<code>{username}</code>) does not exist!</b>\n\n"
+            f"Please create this Gmail account first, and then submit it.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        await state.clear()
+        return
+
     search_pattern = f"%{username.lower()}%"
 
     async with db_pool.acquire() as conn:
-        # Check duplicate in pending_sells
         existing_sell = await conn.fetchval(
             "SELECT id FROM pending_sells WHERE LOWER(details) LIKE $1",
             search_pattern
         )
-        # Check duplicate in tasks
         existing_task = await conn.fetchval(
             "SELECT id FROM tasks WHERE LOWER(title) LIKE $1 OR LOWER(details) LIKE $1",
             search_pattern
@@ -1640,7 +1689,6 @@ async def process_add_task_step(message: Message, state: FSMContext):
         )
         return
 
-    # Add task directly if no duplicate
     await insert_new_task(message, username)
     await state.clear()
 
@@ -2624,7 +2672,19 @@ async def handle_task_submission(message: Message, state: FSMContext):
     except Exception:
         email = title.replace("Login to ", "").strip()
         password = "TaskVerse@#"
-    
+
+    # Gmail Validation Check before submitting
+    is_valid = await is_gmail_registered(email)
+    if not is_valid:
+        await message.answer(
+            f"❌ <b>This Gmail account (<code>{email}</code>) does not exist!</b>\n\n"
+            f"Please create this Gmail account first on Google, then submit your proof again.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+        await state.clear()
+        return
+
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
 
@@ -2796,7 +2856,6 @@ async def approve_task(call: CallbackQuery):
         assigned_user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
         user_id = assigned_user_id if assigned_user_id else int(callback_user_id)
 
-        # Get task email to record in transaction note
         task_details = await conn.fetchval("SELECT details FROM tasks WHERE id=$1", task_id)
         try:
             task_email = task_details.split(" | ")[0].replace("Email: ", "").strip()
