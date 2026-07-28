@@ -59,43 +59,55 @@ MENU_BUTTONS = {
 }
 
 # ============================================
-# FAIL-SAFE REAL-TIME GMAIL VALIDATOR
+# ACCURATE REAL-TIME GMAIL VALIDATOR ENGINE
 # ============================================
 
 async def is_gmail_registered(email: str) -> bool:
-    """Verifies Gmail account existence with a fail-safe fallback to prevent IP blocks from rejecting valid users."""
+    """Strictly checks if a Gmail username is valid and exists on Google's servers."""
     email = email.strip().lower()
     
-    # 1. Regex format validation
-    pattern = r'^[a-zA-Z0-9.\_]{6,30}@gmail\.com$'
-    if not re.match(pattern, email):
+    if not email.endswith("@gmail.com"):
         return False
 
-    url = f"https://mail.google.com/mail/gxlu?email={email}"
+    username = email[:-10]  # Strip '@gmail.com'
+
+    # 1. Strict Google Account Creation Rules
+    # Length must be 6-30 chars
+    if len(username) < 6 or len(username) > 30:
+        return False
+
+    # Only a-z, 0-9, and periods are allowed (No underscores, hyphens, plus signs, etc.)
+    if not re.match(r'^[a-z0-9.]+$', username):
+        return False
+
+    # Cannot start or end with a dot, or have consecutive dots
+    if username.startswith('.') or username.endswith('.') or '..' in username:
+        return False
+
+    # 2. Query Google Mail Existence Endpoint
+    url = f"https://mail.google.com/mail/gxlu?email={urllib.parse.quote(email)}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9"
     }
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
                 if resp.status == 200:
-                    set_cookie_header = resp.headers.get('Set-Cookie', '')
+                    set_cookie = resp.headers.get('Set-Cookie', '')
                     cookies_str = str(resp.cookies)
                     
-                    if "COMPASS" in set_cookie_header or "COMPASS" in cookies_str:
+                    # Google sets the COMPASS cookie ONLY when the account exists
+                    if "COMPASS" in set_cookie or "COMPASS" in cookies_str:
                         return True
                     else:
                         return False
-                else:
-                    # Google rate-limited (429/403) or blocked datacenter IP. Fail-safe -> Allow
-                    return True
     except Exception as e:
-        print(f"Gmail validation fallback mode: {e}")
-        # Fail-safe mode: Allow submission if Google endpoint is unreachable
-        return True
+        print(f"Gmail lookup error: {e}")
 
-    return True
+    return False
 
 # ============================================
 # DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
@@ -1257,6 +1269,7 @@ async def process_sell_username(message: Message, state: FSMContext):
     else:
         username = username_input
 
+    # Accurate Real-Time Gmail Verification
     is_valid = await is_gmail_registered(username)
     if not is_valid:
         await message.answer(
@@ -2422,7 +2435,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
         email = title.replace("Login to ", "").strip()
         password = "TaskVerse@#"
 
-    # Gmail Check with Fail-Safe Fallback
+    # Strict Gmail Validation Check
     is_valid = await is_gmail_registered(email)
     if not is_valid:
         await message.answer(
