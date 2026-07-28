@@ -5,6 +5,7 @@ from threading import Thread
 import urllib.parse
 import time
 import re
+import smtplib
 from flask import Flask
 import aiohttp
 
@@ -32,7 +33,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
 DATABASE_URL = os.environ.get('DATABASE_URL')
-GMAIL_API_KEY = os.environ.get('GMAIL_API_KEY', 'AIzaSyA4b07BywG2SiDblbXfthI_d4K8wFZepgw')
 
 # Currency Conversion Rate (1 USD/USDT = 96.30 INR)
 USD_TO_INR = 96.30
@@ -60,43 +60,62 @@ MENU_BUTTONS = {
 }
 
 # ============================================
-# GMAIL VALIDATOR UTILITY
+# REAL-TIME GMAIL VALIDATOR ENGINE
 # ============================================
 
 async def is_gmail_registered(email: str) -> bool:
-    """Verifies whether a Gmail account exists on Google servers."""
+    """Accurately checks whether a Gmail account exists using Google MX SMTP probes."""
     email = email.strip().lower()
     
-    # 1. Basic Format Validation
+    # 1. Regex format check
     pattern = r'^[a-zA-Z0-9.\_]+@gmail\.com$'
     if not re.match(pattern, email):
         return False
 
+    def _probe_google_smtp():
+        try:
+            server = smtplib.SMTP('gmail-smtp-in.l.google.com', port=25, timeout=5)
+            server.helo('gmail.com')
+            server.mail('verify@gmail.com')
+            code, msg = server.rcpt(email)
+            server.quit()
+            
+            # Status 250 = Mailbox exists on Google!
+            if code == 250:
+                return True
+            # Status 550 = 5.1.1 The email account does not exist!
+            elif code == 550:
+                return False
+        except Exception as e:
+            print(f"SMTP check error: {e}")
+        return None
+
+    # Run blocking SMTP in executor thread
+    loop = asyncio.get_event_loop()
+    smtp_result = await loop.run_in_executor(None, _probe_google_smtp)
+    if smtp_result is not None:
+        return smtp_result
+
+    # Fallback to Google HTTP account lookup if port 25 is restricted
     username = email.replace("@gmail.com", "")
-    
-    # 2. Check existence via Google Account Lookup Endpoint
     url = "https://accounts.google.com/_/signin/v2/lookup/accountlookup"
     headers = {
         "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
         "Google-Accounts-XSRF": "1"
     }
     data = f"f.req=%5B%22{username}%22%2C%22%22%2C%5B%5D%2Cnull%2C%22IN%22%2Cnull%2Cnull%2C2%2C1%2C%5Bnull%2Cnull%2Cnull%2Cnull%2Cnull%2C%5B%5D%2Cnull%2Cnull%2Cnull%5D%2C1%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2C0%5D"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, data=data, timeout=aiox_timeout if 'aiox_timeout' in locals() else 5.0) as resp:
+            async with session.post(url, headers=headers, data=data, timeout=5.0) as resp:
                 text = await resp.text()
-                # If Google returns account details or password prompt, the user exists
-                if "INCORRECT_PASSWORD" in text or "PASSWORD_AUTH" in text or "IDENTIFIER_EXISTS" in text or username in text:
-                    return True
-                # If identifier doesn't exist
                 if "ACCOUNT_NOT_FOUND" in text or "BOOM" in text:
                     return False
-    except Exception as e:
-        print(f"Gmail validation lookup error: {e}")
-        # Default to True in case of network timeout so legitimate users aren't blocked
-        return True
+                if "INCORRECT_PASSWORD" in text or "PASSWORD_AUTH" in text or username in text:
+                    return True
+    except Exception:
+        pass
 
     return True
 
@@ -1252,253 +1271,6 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
     except Exception:
         pass
 
-@dp.callback_query(F.data == "menu_history")
-async def cb_history(call: CallbackQuery, state: FSMContext):
-    await state.clear()
-    user_data = await get_user_data(call.from_user.id)
-    curr = user_data['currency']
-    
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT type, amount, note, created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 10", call.from_user.id)
-    if not rows:
-        txt = "📭 No transactions found."
-        try:
-            await call.message.edit_text(txt, reply_markup=get_back_inline_keyboard())
-        except:
-            await call.message.answer(txt, reply_markup=get_back_inline_keyboard())
-        await state.update_data(last_menu_msg_id=call.message.message_id)
-        try:
-            await call.answer()
-        except Exception:
-            pass
-        return
-    text = '<tg-emoji emoji-id="5440410042773824003">📜</tg-emoji> <b>Last Transactions</b>\n\n'
-    for r in rows:
-        sign = "+" if r['amount'] >= 0 else ""
-        formatted_amt = format_currency(abs(r['amount']), curr)
-        text += f"• {sign}{formatted_amt} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-    
-    try:
-        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
-    except:
-        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
-    await state.update_data(last_menu_msg_id=call.message.message_id)
-    try:
-        await call.answer()
-    except Exception:
-        pass
-
-@dp.callback_query(F.data == "menu_support")
-async def cb_support(call: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await state.set_state(UserState.waiting_for_support)
-    txt = (
-        "🛠 <b>Customer Support</b>\n\n"
-        "Please send your help message or describe your issue below. Our admin team will look into it shortly."
-    )
-    try:
-        await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
-    except:
-        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
-    await state.update_data(last_menu_msg_id=call.message.message_id)
-    try:
-        await call.answer()
-    except Exception:
-        pass
-
-# ============================================
-# SUPPORT SYSTEM
-# ============================================
-
-@dp.message(F.text == "🛠 Support", StateFilter("*"))
-async def support_button_handler(message: Message, state: FSMContext):
-    await state.clear()
-    await state.set_state(UserState.waiting_for_support)
-    sent_msg = await message.answer(
-        "🛠 <b>Customer Support</b>\n\n"
-        "Please send your help message or describe your issue below. Our admin team will look into it shortly.",
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_support_cancel_keyboard()
-    )
-    await state.update_data(last_menu_msg_id=sent_msg.message_id)
-
-@dp.callback_query(F.data == "cancel_support")
-async def cancel_support_callback(call: CallbackQuery, state: FSMContext):
-    await state.clear()
-    try:
-        await call.message.edit_text("❌ Support request cancelled.", reply_markup=None)
-    except:
-        pass
-    sent_msg = await call.message.answer("🏠 Returned to Main Menu.", reply_markup=get_main_menu_keyboard())
-    await state.update_data(last_menu_msg_id=sent_msg.message_id)
-    try:
-        await call.answer()
-    except Exception:
-        pass
-
-@dp.message(UserState.waiting_for_support, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def process_user_support_message(message: Message, state: FSMContext):
-    user_id = message.from_user.id
-    username = f"@{message.from_user.username}" if message.from_user.username else "No Username"
-    user_msg = message.text.strip()
-
-    admin_text = (
-        f"🛠 <b>New Support Request</b>\n\n"
-        f"👤 <b>User:</b> {username}\n"
-        f"🆔 <b>User ID:</b> <code>{user_id}</code>\n\n"
-        f"💬 <b>Message:</b>\n{user_msg}"
-    )
-
-    try:
-        await bot.send_message(ADMIN_ID, admin_text, parse_mode=ParseMode.HTML)
-    except Exception as e:
-        print(f"Failed to forward support message to admin: {e}")
-
-    sent_msg = await message.answer(
-        "✅ <b>Your help message has been sent directly to the admin!</b> We will get back to you soon.",
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_main_menu_keyboard()
-    )
-    await state.clear()
-    await state.update_data(last_menu_msg_id=sent_msg.message_id)
-
-# ============================================
-# USER MENU ACTIONS (COMMAND FALLBACKS)
-# ============================================
-
-@dp.message(Command('task'), StateFilter("*"))
-async def get_task(message: Message, state: FSMContext):
-    await state.clear()
-    user_id = message.from_user.id
-    user_data = await get_user_data(user_id)
-    user_curr = user_data['currency']
-    
-    async with db_pool.acquire() as conn:
-        existing = await conn.fetchrow('''
-            SELECT t.id, t.title, t.details, t.reward, t.status, a.assigned_at 
-            FROM task_assignments a
-            JOIN tasks t ON a.task_id = t.id
-            WHERE a.user_id=$1
-        ''', user_id)
-        
-        if existing:
-            task_id = existing['id']
-            assigned_time = existing['assigned_at']
-            task_status = existing['status']
-            
-            if task_status == 'pending_review':
-                txt = '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Your task submission is currently under admin review. Please wait for approval.'
-                try:
-                    await message.answer(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
-                except:
-                    pass
-                return
-
-            expire_time = assigned_time + timedelta(minutes=30)
-            remaining = expire_time - datetime.utcnow()
-            total_seconds = int(remaining.total_seconds())
-            
-            if total_seconds > 0:
-                mins = total_seconds // 60
-                secs = total_seconds % 60
-                
-                try:
-                    parts = existing['details'].split(" | ")
-                    username = parts[0].replace("Email: ", "").strip()
-                    password = parts[1].replace("Pass: ", "").strip()
-                except:
-                    username = existing['title'].replace("Login to ", "")
-                    password = "See Admin"
-
-                reward_str = format_currency(existing["reward"], user_curr)
-                sent_msg = await message.answer(
-                    f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>You already have an active task.</b>\n\n'
-                    f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Your Current Task</b>\n\n'
-                    f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> #{task_id}\n'
-                    f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> {username} | <tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
-                    f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> {reward_str}\n\n'
-                    f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Time Remaining: {mins}m {secs}s', 
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=get_task_action_keyboard()
-                )
-                await state.update_data(last_menu_msg_id=sent_msg.message_id)
-                return
-            else:
-                async with conn.transaction():
-                    await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
-                    await conn.execute('UPDATE tasks SET status=$1 WHERE id=$2', 'available', task_id)
-
-        task = await conn.fetchrow("SELECT id, title, details, reward FROM tasks WHERE status='available' ORDER BY RANDOM() LIMIT 1")
-        if not task:
-            sent_msg = await message.answer('📭 No tasks available right now.', reply_markup=get_main_menu_keyboard())
-            await state.update_data(last_menu_msg_id=sent_msg.message_id)
-            return
-        
-        task_id = task['id']
-        title = task['title']
-        details = task['details']
-        reward = task['reward']
-        
-        async with conn.transaction():
-            await conn.execute("UPDATE tasks SET status='assigned' WHERE id=$1", task_id)
-            await conn.execute('INSERT INTO task_assignments(task_id, user_id) VALUES ($1, $2)', task_id, user_id)
-
-    try:
-        parts = details.split(" | ")
-        username = parts[0].replace("Email: ", "").strip()
-        password = parts[1].replace("Pass: ", "").strip()
-    except:
-        username = title.replace("Login to ", "")
-        password = "See Admin"
-
-    reward_str = format_currency(reward, user_curr)
-    sent_msg = await message.answer(
-        f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Task #{task_id}</b>\n\n'
-        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> {username} | <tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> {reward_str}\n\n'
-        f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> You have ONLY 30 MINUTES to complete this task.', 
-        parse_mode=ParseMode.HTML, 
-        reply_markup=get_task_action_keyboard()
-    )
-    await state.update_data(last_menu_msg_id=sent_msg.message_id)
-
-@dp.message(Command("balance"), StateFilter("*"))
-async def balance(message: Message, state: FSMContext):
-    await state.clear()
-    user_data = await get_user_data(message.from_user.id)
-    bal = user_data['balance'] if user_data else 0.0
-    upi = user_data['upi'] if user_data and user_data['upi'] else "None"
-    usdt = user_data['usdt_address'] if user_data and user_data['usdt_address'] else "None"
-    curr = user_data['currency'] if user_data else "USD"
-
-    upi_set = upi != "None" and upi != ""
-    usdt_set = usdt != "None" and usdt != ""
-    formatted_bal = format_currency(bal, curr)
-    
-    text = (
-        f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance</b>\n\n'
-        f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Available:</b> {formatted_bal}\n'
-        f'<tg-emoji emoji-id="6278557702109013266">🏦</tg-emoji> <b>UPI:</b> <code>{upi}</code>\n'
-        f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> <b>USDT BEP-20:</b> <code>{usdt}</code>'
-    )
-    
-    sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set))
-    await state.update_data(last_menu_msg_id=sent_msg.message_id)
-
-@dp.message(Command("sell"), StateFilter("*"))
-async def sell(message: Message, state: FSMContext):
-    await state.clear()
-    await state.set_state(UserState.selling_username)
-    user_data = await get_user_data(message.from_user.id)
-    rate_str = format_currency(30.0, user_data['currency'])
-    sent_msg = await message.answer(
-        f'<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>Sell Price {rate_str}/Gmail</b>\n\n'
-        '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail <b>Username</b> (e.g., <code>example@gmail.com</code>):',
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_back_inline_keyboard()
-    )
-    await state.update_data(last_menu_msg_id=sent_msg.message_id)
-
 @dp.message(UserState.selling_username, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_username(message: Message, state: FSMContext):
     username_input = message.text.strip()
@@ -1507,12 +1279,12 @@ async def process_sell_username(message: Message, state: FSMContext):
     else:
         username = username_input
 
-    # Gmail Validation Check
+    # Real-Time Gmail Verification
     is_valid = await is_gmail_registered(username)
     if not is_valid:
         await message.answer(
             f"❌ <b>This Gmail account (<code>{username}</code>) does not exist!</b>\n\n"
-            f"Please create this Gmail account first, and then submit it.",
+            f"Please create this Gmail account first on Google, then submit it.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
@@ -2673,12 +2445,12 @@ async def handle_task_submission(message: Message, state: FSMContext):
         email = title.replace("Login to ", "").strip()
         password = "TaskVerse@#"
 
-    # Gmail Validation Check before submitting
+    # Strict Real-Time Gmail Check
     is_valid = await is_gmail_registered(email)
     if not is_valid:
         await message.answer(
-            f"❌ <b>This Gmail account (<code>{email}</code>) does not exist!</b>\n\n"
-            f"Please create this Gmail account first on Google, then submit your proof again.",
+            f"❌ <b>This Gmail account (<code>{email}</code>) does not exist on Google!</b>\n\n"
+            f"Please create this Gmail account on Google first, then click Submit to send your proof.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
