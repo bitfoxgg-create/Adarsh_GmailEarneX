@@ -32,6 +32,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
 DATABASE_URL = os.environ.get('DATABASE_URL')
+EMAILABLE_API_KEY = os.environ.get('EMAILABLE_API_KEY', 'live_81463a2a3a171f9cf65e')
 
 # Currency Conversion Rate (1 USD/USDT = 96.30 INR)
 USD_TO_INR = 96.30
@@ -59,11 +60,11 @@ MENU_BUTTONS = {
 }
 
 # ============================================
-# FAIL-SAFE GMAIL VALIDATOR ENGINE
+# EMAILABLE GMAIL VALIDATOR ENGINE
 # ============================================
 
 async def is_gmail_registered(email: str) -> bool:
-    """Validates Gmail format strictly and queries Google with a fail-open safety default."""
+    """Verifies Gmail account existence via Emailable API with strict local syntax checks."""
     email = email.strip().lower()
     
     if not email.endswith("@gmail.com"):
@@ -71,7 +72,7 @@ async def is_gmail_registered(email: str) -> bool:
 
     username = email[:-10]  # Strip '@gmail.com'
 
-    # 1. Strict Google Gmail Format Rules (Local Protection)
+    # 1. Strict Google Account Syntax Validation
     if len(username) < 6 or len(username) > 30:
         return False
 
@@ -81,26 +82,30 @@ async def is_gmail_registered(email: str) -> bool:
     if username.startswith('.') or username.endswith('.') or '..' in username:
         return False
 
-    # 2. Network Check with Fail-Open Safety
-    url = f"https://mail.google.com/mail/gxlu?email={urllib.parse.quote(email)}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9"
-    }
+    # 2. Emailable REST API Single Email Verification
+    url = f"https://api.emailable.com/v1/verify?email={urllib.parse.quote(email)}&api_key={EMAILABLE_API_KEY}"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5.0)) as resp:
                 if resp.status == 200:
-                    set_cookie = resp.headers.get('Set-Cookie', '')
-                    cookies_str = str(resp.cookies)
+                    data = await resp.json()
+                    state = data.get("state")
                     
-                    if "COMPASS" in set_cookie or "COMPASS" in cookies_str:
+                    if state == "deliverable":
                         return True
+                    elif state == "undeliverable":
+                        return False
+                    else:
+                        # If state is risky or unknown, allow submission safely
+                        return True
+                else:
+                    print(f"Emailable API HTTP Error: {resp.status}")
+                    return True
     except Exception as e:
-        print(f"Gmail lookup exception: {e}")
+        print(f"Emailable lookup exception: {e}")
+        return True
 
-    # FAIL-SAFE: Return True so Cloud/Render IP blocks never reject real users
     return True
 
 # ============================================
@@ -1263,12 +1268,12 @@ async def process_sell_username(message: Message, state: FSMContext):
     else:
         username = username_input
 
-    # Real-Time Gmail Verification
+    # Emailable Real-Time Gmail Verification
     is_valid = await is_gmail_registered(username)
     if not is_valid:
         await message.answer(
-            f"❌ <b>Invalid Gmail username format or rules!</b>\n\n"
-            f"Gmail usernames must be 6-30 characters long and contain only letters, numbers, and periods.",
+            f"❌ <b>This Gmail account (<code>{username}</code>) does not exist on Google!</b>\n\n"
+            f"Please create this Gmail account first on Google, then try again.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
@@ -2429,12 +2434,12 @@ async def handle_task_submission(message: Message, state: FSMContext):
         email = title.replace("Login to ", "").strip()
         password = "TaskVerse@#"
 
-    # Strict Gmail Format Verification
+    # Real-Time Emailable Verification Check
     is_valid = await is_gmail_registered(email)
     if not is_valid:
         await message.answer(
-            f"❌ <b>Invalid Gmail username format or rules!</b>\n\n"
-            f"Please ensure you created the account properly on Google.",
+            f"❌ <b>This Gmail account (<code>{email}</code>) does not exist on Google!</b>\n\n"
+            f"Please create this Gmail account first on Google, then submit your proof again.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
