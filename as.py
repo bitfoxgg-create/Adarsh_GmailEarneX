@@ -5,7 +5,6 @@ from threading import Thread
 import urllib.parse
 import time
 import re
-import smtplib
 from flask import Flask
 import aiohttp
 
@@ -60,64 +59,37 @@ MENU_BUTTONS = {
 }
 
 # ============================================
-# REAL-TIME GMAIL VALIDATOR ENGINE
+# ULTRA-FAST REAL-TIME GMAIL VALIDATOR
 # ============================================
 
 async def is_gmail_registered(email: str) -> bool:
-    """Accurately checks whether a Gmail account exists using Google MX SMTP probes."""
+    """Fast, non-blocking check to verify if a Gmail inbox exists on Google servers."""
     email = email.strip().lower()
     
-    # 1. Regex format check
+    # 1. Basic Regex Format Check
     pattern = r'^[a-zA-Z0-9.\_]+@gmail\.com$'
     if not re.match(pattern, email):
         return False
 
-    def _probe_google_smtp():
-        try:
-            server = smtplib.SMTP('gmail-smtp-in.l.google.com', port=25, timeout=5)
-            server.helo('gmail.com')
-            server.mail('verify@gmail.com')
-            code, msg = server.rcpt(email)
-            server.quit()
-            
-            # Status 250 = Mailbox exists on Google!
-            if code == 250:
-                return True
-            # Status 550 = 5.1.1 The email account does not exist!
-            elif code == 550:
-                return False
-        except Exception as e:
-            print(f"SMTP check error: {e}")
-        return None
-
-    # Run blocking SMTP in executor thread
-    loop = asyncio.get_event_loop()
-    smtp_result = await loop.run_in_executor(None, _probe_google_smtp)
-    if smtp_result is not None:
-        return smtp_result
-
-    # Fallback to Google HTTP account lookup if port 25 is restricted
-    username = email.replace("@gmail.com", "")
-    url = "https://accounts.google.com/_/signin/v2/lookup/accountlookup"
+    url = f"https://mail.google.com/mail/gxlu?email={email}"
     headers = {
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Google-Accounts-XSRF": "1"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
-    data = f"f.req=%5B%22{username}%22%2C%22%22%2C%5B%5D%2Cnull%2C%22IN%22%2Cnull%2Cnull%2C2%2C1%2C%5Bnull%2Cnull%2Cnull%2Cnull%2Cnull%2C%5B%5D%2Cnull%2Cnull%2Cnull%5D%2C1%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2C0%5D"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, data=data, timeout=5.0) as resp:
-                text = await resp.text()
-                if "ACCOUNT_NOT_FOUND" in text or "BOOM" in text:
-                    return False
-                if "INCORRECT_PASSWORD" in text or "PASSWORD_AUTH" in text or username in text:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
+                set_cookie_header = resp.headers.get('Set-Cookie', '')
+                cookies_str = str(resp.cookies)
+                
+                # Google issues a 'COMPASS' token in Set-Cookie only for registered accounts
+                if "COMPASS" in set_cookie_header or "COMPASS" in cookies_str:
                     return True
-    except Exception:
-        pass
-
-    return True
+                else:
+                    return False
+    except Exception as e:
+        print(f"Gmail validation error: {e}")
+        return False
 
 # ============================================
 # DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
@@ -1279,12 +1251,12 @@ async def process_sell_username(message: Message, state: FSMContext):
     else:
         username = username_input
 
-    # Real-Time Gmail Verification
+    # Fast Non-Blocking Gmail Check
     is_valid = await is_gmail_registered(username)
     if not is_valid:
         await message.answer(
-            f"❌ <b>This Gmail account (<code>{username}</code>) does not exist!</b>\n\n"
-            f"Please create this Gmail account first on Google, then submit it.",
+            f"❌ <b>This Gmail account (<code>{username}</code>) does not exist on Google!</b>\n\n"
+            f"Please create this Gmail account first on Google, then try again.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
@@ -2445,12 +2417,12 @@ async def handle_task_submission(message: Message, state: FSMContext):
         email = title.replace("Login to ", "").strip()
         password = "TaskVerse@#"
 
-    # Strict Real-Time Gmail Check
+    # Fast Non-Blocking Gmail Verification
     is_valid = await is_gmail_registered(email)
     if not is_valid:
         await message.answer(
             f"❌ <b>This Gmail account (<code>{email}</code>) does not exist on Google!</b>\n\n"
-            f"Please create this Gmail account on Google first, then click Submit to send your proof.",
+            f"Please create this Gmail account first on Google, then submit your proof again.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
