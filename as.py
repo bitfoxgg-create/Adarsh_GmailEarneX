@@ -1272,12 +1272,11 @@ async def process_sell_username(message: Message, state: FSMContext):
     is_valid = await is_gmail_registered(username)
     if not is_valid:
         await message.answer(
-            f"❌ <b>This Gmail account (<code>{username}</code>) does not exist on Google!</b>\n\n"
-            f"Please create this Gmail account first on Google, then try again.",
+            f"❌ This Gmail account ({username}) does not exist on Google!\n\n"
+            f"Please Provide Valid Gmail Username, then try again.",
             parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()
+            reply_markup=get_back_inline_keyboard()
         )
-        await state.clear()
         return
 
     search_pattern = f"%{username.lower()}%"
@@ -2434,16 +2433,14 @@ async def handle_task_submission(message: Message, state: FSMContext):
         email = title.replace("Login to ", "").strip()
         password = "TaskVerse@#"
 
-    # Real-Time Emailable Verification Check
+    # Emailable Real-Time Gmail Verification
     is_valid = await is_gmail_registered(email)
     if not is_valid:
         await message.answer(
             f"❌ <b>This Gmail account (<code>{email}</code>) does not exist on Google!</b>\n\n"
-            f"Please create this Gmail account first on Google, then submit your proof again.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_main_menu_keyboard()
+            f"Please create <code>{email}</code> first on Google, then submit your proof again.",
+            parse_mode=ParseMode.HTML
         )
-        await state.clear()
         return
 
     async with db_pool.acquire() as conn:
