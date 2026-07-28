@@ -59,15 +59,15 @@ MENU_BUTTONS = {
 }
 
 # ============================================
-# ULTRA-FAST REAL-TIME GMAIL VALIDATOR
+# FAIL-SAFE REAL-TIME GMAIL VALIDATOR
 # ============================================
 
 async def is_gmail_registered(email: str) -> bool:
-    """Fast, non-blocking check to verify if a Gmail inbox exists on Google servers."""
+    """Verifies Gmail account existence with a fail-safe fallback to prevent IP blocks from rejecting valid users."""
     email = email.strip().lower()
     
-    # 1. Basic Regex Format Check
-    pattern = r'^[a-zA-Z0-9.\_]+@gmail\.com$'
+    # 1. Regex format validation
+    pattern = r'^[a-zA-Z0-9.\_]{6,30}@gmail\.com$'
     if not re.match(pattern, email):
         return False
 
@@ -79,17 +79,23 @@ async def is_gmail_registered(email: str) -> bool:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
-                set_cookie_header = resp.headers.get('Set-Cookie', '')
-                cookies_str = str(resp.cookies)
-                
-                # Google issues a 'COMPASS' token in Set-Cookie only for registered accounts
-                if "COMPASS" in set_cookie_header or "COMPASS" in cookies_str:
-                    return True
+                if resp.status == 200:
+                    set_cookie_header = resp.headers.get('Set-Cookie', '')
+                    cookies_str = str(resp.cookies)
+                    
+                    if "COMPASS" in set_cookie_header or "COMPASS" in cookies_str:
+                        return True
+                    else:
+                        return False
                 else:
-                    return False
+                    # Google rate-limited (429/403) or blocked datacenter IP. Fail-safe -> Allow
+                    return True
     except Exception as e:
-        print(f"Gmail validation error: {e}")
-        return False
+        print(f"Gmail validation fallback mode: {e}")
+        # Fail-safe mode: Allow submission if Google endpoint is unreachable
+        return True
+
+    return True
 
 # ============================================
 # DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
@@ -509,7 +515,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
     usdt_link_text = "Change USDT BEP-20" if usdt_set else "Link USDT BEP-20"
     
     upi_emoji = "6278557702109013266" if upi_set else "5902449142575141204"
-    usdt_emoji = "5197434882321567830" if usdt_set else "5902449142575141204"
+    usdt_emoji = "5197434882321567830" if upi_set else "5902449142575141204"
 
     kb.button(text=upi_link_text, callback_data="link_upi", icon_custom_emoji_id=upi_emoji, style="primary")
     kb.button(text=usdt_link_text, callback_data="link_usdt", icon_custom_emoji_id=usdt_emoji, style="primary")
@@ -1251,7 +1257,6 @@ async def process_sell_username(message: Message, state: FSMContext):
     else:
         username = username_input
 
-    # Fast Non-Blocking Gmail Check
     is_valid = await is_gmail_registered(username)
     if not is_valid:
         await message.answer(
@@ -2417,7 +2422,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
         email = title.replace("Login to ", "").strip()
         password = "TaskVerse@#"
 
-    # Fast Non-Blocking Gmail Verification
+    # Gmail Check with Fail-Safe Fallback
     is_valid = await is_gmail_registered(email)
     if not is_valid:
         await message.answer(
