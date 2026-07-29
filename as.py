@@ -32,7 +32,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
 DATABASE_URL = os.environ.get('DATABASE_URL')
-EMAILABLE_API_KEY = os.environ.get('EMAILABLE_API_KEY', 'live_81463a2a3a171f9cf65e')
 
 # Currency Conversion Rate (1 USD/USDT = 96.30 INR)
 USD_TO_INR = 96.30
@@ -44,7 +43,9 @@ db_pool = None
 BANNED_USERS_CACHE = set()
 MUST_JOIN_CHANNEL = None
 BOT_USERNAME = "Gmailpaybot"
-BOT_STATUS = True  # True = ON, False = OFF
+BOT_STATUS = True           # True = ON, False = OFF
+EMAILABLE_API_KEY = "live_81463a2a3a171f9cf65e"
+VALIDATOR_ENABLED = True     # True = Active, False = Deactivated
 
 # IN-MEMORY SPEED CACHES
 JOINED_CACHE = {}     # {user_id: timestamp_joined}
@@ -56,7 +57,7 @@ MENU_BUTTONS = {
     "➕ Add Task", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
-    "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON"
+    "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "⚙️ Validator"
 }
 
 # ============================================
@@ -82,7 +83,11 @@ async def is_gmail_registered(email: str) -> bool:
     if username.startswith('.') or username.endswith('.') or '..' in username:
         return False
 
-    # 2. Emailable REST API Single Email Verification
+    # 2. Check if Validator is globally enabled by admin
+    if not VALIDATOR_ENABLED:
+        return True
+
+    # 3. Emailable REST API Single Email Verification
     url = f"https://api.emailable.com/v1/verify?email={urllib.parse.quote(email)}&api_key={EMAILABLE_API_KEY}"
 
     try:
@@ -153,6 +158,7 @@ class AdminState(StatesGroup):
     waiting_for_chat_message = State()
     waiting_for_unassign_user_id = State()
     waiting_for_find_id_query = State()
+    waiting_for_validator_key = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -260,7 +266,7 @@ async def init_db():
         ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id FROM banned_users")
         BANNED_USERS_CACHE = {r['user_id'] for r in rows}
@@ -270,6 +276,13 @@ async def load_settings_and_cache():
 
         status_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='bot_status'")
         BOT_STATUS = (status_val != 'off')
+
+        key_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='emailable_api_key'")
+        if key_val:
+            EMAILABLE_API_KEY = key_val
+
+        val_enabled = await conn.fetchval("SELECT value FROM bot_settings WHERE key='validator_enabled'")
+        VALIDATOR_ENABLED = (val_enabled != 'off')
 
     try:
         me = await bot.get_me()
@@ -496,12 +509,34 @@ def get_admin_menu_keyboard():
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
     
+    # Bot Status button and Validator button in same row above Main Menu
     status_btn_text = "🟢 Bot Status: ON" if BOT_STATUS else "🔴 Bot Status: OFF"
     kb.button(text=status_btn_text, style="danger" if BOT_STATUS else "success")
+    kb.button(text="⚙️ Validator", style="primary")
     
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
+
+def get_validator_admin_inline_keyboard():
+    kb = InlineKeyboardBuilder()
+    status_toggle_text = "🔴 Deactivate" if VALIDATOR_ENABLED else "🟢 Activate"
+    status_style = "danger" if VALIDATOR_ENABLED else "success"
+
+    kb.button(
+        text="🔑 Change Key", 
+        callback_data="admin_validator_change_key", 
+        icon_custom_emoji_id="6005570495603282482", 
+        style="primary"
+    )
+    kb.button(
+        text=status_toggle_text, 
+        callback_data="admin_validator_toggle_status", 
+        icon_custom_emoji_id="6217663806110175239", 
+        style=status_style
+    )
+    kb.adjust(2)
+    return kb.as_markup()
 
 def get_unassign_inline_keyboard():
     kb = InlineKeyboardBuilder()
@@ -1403,6 +1438,82 @@ async def admin_btn_toggle_status(message: Message, state: FSMContext):
 
     status_str = "🟢 <b>Bot is now ONLINE and ENABLED for all users!</b>" if BOT_STATUS else "🔴 <b>Bot is now OFF and DISABLED for normal users!</b>"
     await message.answer(status_str, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+
+@dp.message(F.text == "⚙️ Validator", StateFilter("*"))
+async def admin_btn_validator_menu(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    
+    val_status_str = "🟢 <b>Active</b>" if VALIDATOR_ENABLED else "🔴 <b>Deactivated</b>"
+    
+    text = (
+        f"⚙️ <b>Gmail Validator Management</b>\n\n"
+        f"🔑 <b>Current API Key:</b> <code>{EMAILABLE_API_KEY}</code>\n"
+        f"📌 <b>Validator Status:</b> {val_status_str}\n\n"
+        f"Use the buttons below to configure the Emailable validator:"
+    )
+    
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_validator_admin_inline_keyboard())
+
+@dp.callback_query(F.data == "admin_validator_toggle_status")
+async def cb_admin_validator_toggle_status(call: CallbackQuery):
+    global VALIDATOR_ENABLED
+    VALIDATOR_ENABLED = not VALIDATOR_ENABLED
+    new_val = 'on' if VALIDATOR_ENABLED else 'off'
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('validator_enabled', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
+
+    status_text = "🟢 <b>Active</b>" if VALIDATOR_ENABLED else "🔴 <b>Deactivated</b>"
+    text = (
+        f"⚙️ <b>Gmail Validator Management</b>\n\n"
+        f"🔑 <b>Current API Key:</b> <code>{EMAILABLE_API_KEY}</code>\n"
+        f"📌 <b>Validator Status:</b> {status_text}\n\n"
+        f"Use the buttons below to configure the Emailable validator:"
+    )
+
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_validator_admin_inline_keyboard())
+    except Exception:
+        pass
+
+    try:
+        await call.answer(f"Validator status updated!", show_alert=True)
+    except Exception:
+        pass
+
+@dp.callback_query(F.data == "admin_validator_change_key")
+async def cb_admin_validator_change_key(call: CallbackQuery, state: FSMContext):
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
+    await state.set_state(AdminState.waiting_for_validator_key)
+    await call.message.answer(
+        "🔑 <b>Send the new Emailable API key:</b>\n\n"
+        "<i>Example: <code>live_81463a2a3a171f9cf65e</code></i>",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_validator_key, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_change_validator_key(message: Message, state: FSMContext):
+    global EMAILABLE_API_KEY
+    new_key = message.text.strip()
+
+    EMAILABLE_API_KEY = new_key
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('emailable_api_key', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_key)
+
+    await message.answer(
+        f"✅ <b>Emailable API Key Updated Successfully!</b>\n\n"
+        f"🔑 <b>New Key:</b> <code>{new_key}</code>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_admin_menu_keyboard()
+    )
+    await state.clear()
 
 @dp.message(F.text == "➕ Add Task", StateFilter("*"))
 async def admin_btn_add_task(message: Message, state: FSMContext):
