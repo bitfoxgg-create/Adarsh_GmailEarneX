@@ -5,6 +5,7 @@ from threading import Thread
 import urllib.parse
 import time
 import re
+import json
 from flask import Flask
 import aiohttp
 
@@ -644,6 +645,70 @@ async def edit_admin_message(call: CallbackQuery, additional_text: str):
             await call.message.edit_text(text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
     except Exception as e:
         print(f"Error editing admin message: {e}")
+
+# ============================================
+# MINI APP WEB APP DATA HANDLER
+# ============================================
+
+@dp.message(F.web_app_data)
+async def handle_mini_app_data(message: Message, state: FSMContext):
+    try:
+        data = json.loads(message.web_app_data.data)
+        action = data.get("action")
+        user_id = message.from_user.id
+
+        if action == "sell_gmail":
+            email = data.get("email")
+            password = data.get("pass")
+
+            is_valid = await is_gmail_registered(email)
+            if not is_valid:
+                await message.answer(
+                    f"❌ This Gmail account ({email}) does not exist on Google!\n\n"
+                    f"Please Provide Valid Gmail Username, then try again."
+                )
+                return
+
+            rate = 30.0
+            details = f"Username: {email}\nPassword: {password}"
+
+            async with db_pool.acquire() as conn:
+                sell_id = await conn.fetchval(
+                    "INSERT INTO pending_sells (user_id, details, amount) VALUES ($1, $2, $3) RETURNING id",
+                    user_id, details, rate
+                )
+
+            kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="Approve", callback_data=f"sellapprove_db:{sell_id}:{user_id}:{rate}", icon_custom_emoji_id="6217663806110175239", style="success"),
+                InlineKeyboardButton(text="Decline", callback_data=f"selldecline_db:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
+            ]])
+
+            admin_message_text = (
+                f"📨 <b>New Gmail Sell Request #{sell_id}</b>\n\n"
+                f"👤 <b>Seller:</b> @{message.from_user.username} (<code>{user_id}</code>)\n"
+                f"📧 <b>Username:</b> <code>{email}</code>\n"
+                f"🔑 <b>Password:</b> <code>{password}</code>\n"
+                f"💰 <b>Payout Rate:</b> ₹{rate:.2f}"
+            )
+
+            await bot.send_message(ADMIN_ID, admin_message_text, reply_markup=kb, parse_mode=ParseMode.HTML)
+            await message.answer(
+                f"✅ Your Gmail sell account details (Request #{sell_id}) have been sent for admin review.\n\n"
+                f"⚠️ <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!",
+                reply_markup=get_main_menu_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
+
+        elif action == "get_task":
+            cb_mock = type('Call', (), {'from_user': message.from_user, 'message': message, 'answer': lambda: None})
+            await cb_get_task(cb_mock, state)
+
+        elif action == "view_balance":
+            cb_mock = type('Call', (), {'from_user': message.from_user, 'message': message, 'answer': lambda: None})
+            await cb_balance(cb_mock, state)
+
+    except Exception as e:
+        print(f"Mini App Data Processing Error: {e}")
 
 # ============================================
 # GLOBAL BAN, BOT STATUS & MUST-JOIN MIDDLEWARES
