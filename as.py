@@ -21,7 +21,8 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     CopyTextButton,
-    ChatMemberUpdated
+    ChatMemberUpdated,
+    WebAppInfo
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
@@ -32,6 +33,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
 DATABASE_URL = os.environ.get('DATABASE_URL')
+WEB_APP_URL = "https://glittering-jalebi-89a5ee.netlify.app"
 
 # Currency Conversion Rate (1 USD/USDT = 96.30 INR)
 USD_TO_INR = 96.30
@@ -396,6 +398,12 @@ def get_must_join_keyboard():
 
 def get_main_menu_keyboard():
     kb = InlineKeyboardBuilder()
+    
+    # Mini App Launch Button
+    kb.button(
+        text="🚀 Open Web App",
+        web_app=WebAppInfo(url=WEB_APP_URL)
+    )
     kb.button(
         text="Get Task",
         callback_data="menu_get_task",
@@ -443,7 +451,7 @@ def get_main_menu_keyboard():
         icon_custom_emoji_id="5274099962655816924",
         style="danger"
     )
-    kb.adjust(2, 2, 2, 1, 1)
+    kb.adjust(1, 2, 2, 2, 1, 1)
     return kb.as_markup()
 
 def get_referral_inline_keyboard(user_id: int):
@@ -509,7 +517,6 @@ def get_admin_menu_keyboard():
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
     
-    # Bot Status button and Validator button in same row above Main Menu
     status_btn_text = "🟢 Bot Status: ON" if BOT_STATUS else "🔴 Bot Status: OFF"
     kb.button(text=status_btn_text, style="danger" if BOT_STATUS else "success")
     kb.button(text="⚙️ Validator", style="primary")
@@ -2544,7 +2551,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
         email = title.replace("Login to ", "").strip()
         password = "TaskVerse@#"
 
-    # Emailable Real-Time Gmail Verification
+    # Real-Time Emailable Verification Check
     is_valid = await is_gmail_registered(email)
     if not is_valid:
         await message.answer(
