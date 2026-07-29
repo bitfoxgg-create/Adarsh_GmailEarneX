@@ -5,7 +5,6 @@ from threading import Thread
 import urllib.parse
 import time
 import re
-import json
 from flask import Flask
 import aiohttp
 
@@ -22,8 +21,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     CopyTextButton,
-    ChatMemberUpdated,
-    WebAppInfo
+    ChatMemberUpdated
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
@@ -34,7 +32,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
 DATABASE_URL = os.environ.get('DATABASE_URL')
-WEB_APP_URL = "https://glittering-jalebi-89a5ee.netlify.app"
 
 # Currency Conversion Rate (1 USD/USDT = 96.30 INR)
 USD_TO_INR = 96.30
@@ -399,12 +396,6 @@ def get_must_join_keyboard():
 
 def get_main_menu_keyboard():
     kb = InlineKeyboardBuilder()
-    
-    # Mini App Launch Button
-    kb.button(
-        text="🚀 Open Web App",
-        web_app=WebAppInfo(url=WEB_APP_URL)
-    )
     kb.button(
         text="Get Task",
         callback_data="menu_get_task",
@@ -452,7 +443,7 @@ def get_main_menu_keyboard():
         icon_custom_emoji_id="5274099962655816924",
         style="danger"
     )
-    kb.adjust(1, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 def get_referral_inline_keyboard(user_id: int):
@@ -518,6 +509,7 @@ def get_admin_menu_keyboard():
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
     
+    # Bot Status button and Validator button in same row above Main Menu
     status_btn_text = "🟢 Bot Status: ON" if BOT_STATUS else "🔴 Bot Status: OFF"
     kb.button(text=status_btn_text, style="danger" if BOT_STATUS else "success")
     kb.button(text="⚙️ Validator", style="primary")
@@ -645,70 +637,6 @@ async def edit_admin_message(call: CallbackQuery, additional_text: str):
             await call.message.edit_text(text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
     except Exception as e:
         print(f"Error editing admin message: {e}")
-
-# ============================================
-# MINI APP WEB APP DATA HANDLER
-# ============================================
-
-@dp.message(F.web_app_data)
-async def handle_mini_app_data(message: Message, state: FSMContext):
-    try:
-        data = json.loads(message.web_app_data.data)
-        action = data.get("action")
-        user_id = message.from_user.id
-
-        if action == "sell_gmail":
-            email = data.get("email")
-            password = data.get("pass")
-
-            is_valid = await is_gmail_registered(email)
-            if not is_valid:
-                await message.answer(
-                    f"❌ This Gmail account ({email}) does not exist on Google!\n\n"
-                    f"Please Provide Valid Gmail Username, then try again."
-                )
-                return
-
-            rate = 30.0
-            details = f"Username: {email}\nPassword: {password}"
-
-            async with db_pool.acquire() as conn:
-                sell_id = await conn.fetchval(
-                    "INSERT INTO pending_sells (user_id, details, amount) VALUES ($1, $2, $3) RETURNING id",
-                    user_id, details, rate
-                )
-
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="Approve", callback_data=f"sellapprove_db:{sell_id}:{user_id}:{rate}", icon_custom_emoji_id="6217663806110175239", style="success"),
-                InlineKeyboardButton(text="Decline", callback_data=f"selldecline_db:{sell_id}:{user_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
-            ]])
-
-            admin_message_text = (
-                f"📨 <b>New Gmail Sell Request #{sell_id}</b>\n\n"
-                f"👤 <b>Seller:</b> @{message.from_user.username} (<code>{user_id}</code>)\n"
-                f"📧 <b>Username:</b> <code>{email}</code>\n"
-                f"🔑 <b>Password:</b> <code>{password}</code>\n"
-                f"💰 <b>Payout Rate:</b> ₹{rate:.2f}"
-            )
-
-            await bot.send_message(ADMIN_ID, admin_message_text, reply_markup=kb, parse_mode=ParseMode.HTML)
-            await message.answer(
-                f"✅ Your Gmail sell account details (Request #{sell_id}) have been sent for admin review.\n\n"
-                f"⚠️ <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!",
-                reply_markup=get_main_menu_keyboard(),
-                parse_mode=ParseMode.HTML
-            )
-
-        elif action == "get_task":
-            cb_mock = type('Call', (), {'from_user': message.from_user, 'message': message, 'answer': lambda: None})
-            await cb_get_task(cb_mock, state)
-
-        elif action == "view_balance":
-            cb_mock = type('Call', (), {'from_user': message.from_user, 'message': message, 'answer': lambda: None})
-            await cb_balance(cb_mock, state)
-
-    except Exception as e:
-        print(f"Mini App Data Processing Error: {e}")
 
 # ============================================
 # GLOBAL BAN, BOT STATUS & MUST-JOIN MIDDLEWARES
@@ -2616,7 +2544,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
         email = title.replace("Login to ", "").strip()
         password = "TaskVerse@#"
 
-    # Real-Time Emailable Verification Check
+    # Emailable Real-Time Gmail Verification
     is_valid = await is_gmail_registered(email)
     if not is_valid:
         await message.answer(
