@@ -88,7 +88,7 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
     if not VALIDATOR_ENABLED:
         return True
 
-    # Send notification message to user
+    # Send requested verification notification to user
     if user_id:
         try:
             await bot.send_message(
@@ -108,7 +108,6 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
                 if resp.status == 200:
                     raw_text = await resp.text()
                     
-                    # Safe parsing for string JSON vs direct dict
                     try:
                         data = json.loads(raw_text) if isinstance(raw_text, str) else await resp.json()
                     except Exception:
@@ -121,11 +120,11 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
                     status_code = str(data.get("StatusCode", "")).strip()
                     status_text = str(data.get("status") or data.get("AddressStatus") or "").strip().lower()
 
-                    # MyEmailVerifier explicitly uses StatusCode '1' or status 'valid'/'deliverable' for existing emails
+                    # MyEmailVerifier uses StatusCode '1' or status 'valid'/'deliverable' for existing emails
                     if status_code == "1" or status_text in ["valid", "deliverable", "ok", "true"]:
                         return True
 
-                    # Explicit fail cases: '0', 'invalid', 'undeliverable', 'catch-all', 'unknown', etc.
+                    # Reject non-existent/invalid emails
                     print(f"[Validator Debug] Invalid Gmail rejected: {email} | Response: {data}")
                     return False
                 else:
@@ -136,6 +135,20 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
         return False
 
     return False
+
+# ============================================
+# DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
+# ============================================
+
+flask_app = Flask('')
+
+@flask_app.route('/')
+def home():
+    return "Bot is running!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    flask_app.run(host='0.0.0.0', port=port)
 
 # ============================================
 # STATES
