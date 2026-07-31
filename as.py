@@ -516,7 +516,7 @@ def get_referral_inline_keyboard(user_id: int):
     kb.button(
         text="Back",
         callback_data="menu_back",
-        icon_custom_emoji_id="6039539366177541657"
+        icon_custom_emoji_id="5352759161945867747"
     )
     kb.adjust(2, 1)
     return kb.as_markup()
@@ -532,7 +532,7 @@ def get_settings_keyboard(notif_enabled: bool, currency: str):
     kb.button(
         text="Back",
         callback_data="menu_back",
-        icon_custom_emoji_id="6039539366177541657"
+        icon_custom_emoji_id="5352759161945867747"
     )
     kb.adjust(1, 1, 1)
     return kb.as_markup()
@@ -629,7 +629,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
     kb.button(
         text="Back",
         callback_data="menu_back",
-        icon_custom_emoji_id="6039539366177541657"
+        icon_custom_emoji_id="5352759161945867747"
     )
     kb.adjust(2, 1, 1)
     return kb.as_markup()
@@ -641,7 +641,7 @@ def get_withdraw_options_keyboard():
     kb.button(
         text="Back",
         callback_data="menu_balance",
-        icon_custom_emoji_id="6039539366177541657"
+        icon_custom_emoji_id="5352759161945867747"
     )
     kb.adjust(1, 1, 1)
     return kb.as_markup()
@@ -651,7 +651,7 @@ def get_back_inline_keyboard():
     kb.button(
         text="Back",
         callback_data="menu_back",
-        icon_custom_emoji_id="6039539366177541657"
+        icon_custom_emoji_id="5352759161945867747"
     )
     kb.adjust(1)
     return kb.as_markup()
@@ -677,7 +677,7 @@ def get_support_cancel_keyboard():
     kb.button(
         text="Back", 
         callback_data="menu_back", 
-        icon_custom_emoji_id="6039539366177541657"
+        icon_custom_emoji_id="5352759161945867747"
     )
     kb.adjust(1)
     return kb.as_markup()
@@ -1078,7 +1078,7 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
         
         kb.row(*nav_buttons)
 
-    kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back", icon_custom_emoji_id="6039539366177541657"))
+    kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back", icon_custom_emoji_id="5352759161945867747"))
 
     return text, kb.as_markup()
 
@@ -1699,7 +1699,7 @@ async def process_add_task_step(message: Message, state: FSMContext):
         kb.button(
             text="Back", 
             callback_data="cancel_add_duplicate_task", 
-            icon_custom_emoji_id="6039539366177541657", 
+            icon_custom_emoji_id="5352759161945867747", 
             style="danger"
         )
         kb.adjust(2)
