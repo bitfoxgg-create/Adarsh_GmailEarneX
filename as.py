@@ -66,7 +66,7 @@ MENU_BUTTONS = {
 # ============================================
 
 async def is_gmail_registered(email: str, user_id: int = None) -> bool:
-    """Verifies Gmail account existence via MyEmailVerifier API with strict local syntax checks."""
+    """Verifies Gmail account existence via MyEmailVerifier API with strict checks."""
     email = email.strip().lower()
     
     if not email.endswith("@gmail.com"):
@@ -88,7 +88,7 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
     if not VALIDATOR_ENABLED:
         return True
 
-    # Send requested verification notification to user if user_id is passed
+    # Send notification message to user
     if user_id:
         try:
             await bot.send_message(
@@ -99,65 +99,43 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
         except Exception:
             pass
 
-    # 3. MyEmailVerifier Single Email Verification API
+    # 3. MyEmailVerifier Single Email Verification API Call
     url = f"https://api.myemailverifier.com/api/validate_single.php?apikey={urllib.parse.quote(EMAILABLE_API_KEY)}&email={urllib.parse.quote(email)}"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=12.0)) as resp:
                 if resp.status == 200:
                     raw_text = await resp.text()
+                    
+                    # Safe parsing for string JSON vs direct dict
                     try:
                         data = json.loads(raw_text) if isinstance(raw_text, str) else await resp.json()
                     except Exception:
                         data = await resp.json()
 
                     if not isinstance(data, dict):
-                        return True
-
-                    # Check for StatusCode / status / AddressStatus
-                    status_val = str(
-                        data.get("StatusCode") or 
-                        data.get("status") or 
-                        data.get("AddressStatus") or 
-                        ""
-                    ).strip().lower()
-
-                    # Check for explicit invalid responses (0, invalid, undeliverable, disabled, non_existing)
-                    if status_val in ["0", "invalid", "undeliverable", "disabled", "false", "failed"]:
                         return False
 
-                    # Check for explicit valid responses (1, valid, deliverable)
-                    if status_val in ["1", "valid", "deliverable", "true"]:
+                    # Extract status code or status text safely
+                    status_code = str(data.get("StatusCode", "")).strip()
+                    status_text = str(data.get("status") or data.get("AddressStatus") or "").strip().lower()
+
+                    # MyEmailVerifier explicitly uses StatusCode '1' or status 'valid'/'deliverable' for existing emails
+                    if status_code == "1" or status_text in ["valid", "deliverable", "ok", "true"]:
                         return True
 
-                    # Fallback check on 'response_code' or 'valid' boolean key
-                    if "valid" in data:
-                        return bool(data["valid"])
-
-                    return True
+                    # Explicit fail cases: '0', 'invalid', 'undeliverable', 'catch-all', 'unknown', etc.
+                    print(f"[Validator Debug] Invalid Gmail rejected: {email} | Response: {data}")
+                    return False
                 else:
-                    print(f"MyEmailVerifier API HTTP Error: {resp.status}")
-                    return True
+                    print(f"MyEmailVerifier HTTP Error: {resp.status}")
+                    return False
     except Exception as e:
-        print(f"MyEmailVerifier lookup exception: {e}")
-        return True
+        print(f"MyEmailVerifier Connection Exception: {e}")
+        return False
 
-    return True
-
-# ============================================
-# DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
-# ============================================
-
-flask_app = Flask('')
-
-@flask_app.route('/')
-def home():
-    return "Bot is running!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    flask_app.run(host='0.0.0.0', port=port)
+    return False
 
 # ============================================
 # STATES
