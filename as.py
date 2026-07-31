@@ -616,7 +616,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
     usdt_link_text = "Change USDT BEP-20" if usdt_set else "Link USDT BEP-20"
     
     upi_emoji = "6278557702109013266" if upi_set else "5902449142575141204"
-    usdt_emoji = "5197434882321567830" if usdt_set else "5902449142575141204"
+    usdt_emoji = "5197434882321567830" if upi_set else "5902449142575141204"
 
     kb.button(text=upi_link_text, callback_data="link_upi", icon_custom_emoji_id=upi_emoji, style="primary")
     kb.button(text=usdt_link_text, callback_data="link_usdt", icon_custom_emoji_id=usdt_emoji, style="primary")
@@ -2118,6 +2118,36 @@ async def set_must_join_command(message: Message, state: FSMContext):
 # ============================================
 # INPUT PROCESSORS FOR STATES
 # ============================================
+
+@dp.message(AdminState.waiting_for_channel_link, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_set_must_join_step(message: Message, state: FSMContext):
+    global MUST_JOIN_CHANNEL
+    input_text = message.text.strip()
+
+    if input_text.lower() == 'none':
+        MUST_JOIN_CHANNEL = None
+        new_val = 'none'
+        confirm_text = "📢 <b>Must Join Channel feature has been DISABLED.</b>"
+    else:
+        if "t.me/" in input_text:
+            channel = "@" + input_text.split("t.me/")[-1].replace("/", "").strip()
+        elif input_text.startswith("@"):
+            channel = input_text
+        else:
+            channel = "@" + input_text
+
+        MUST_JOIN_CHANNEL = channel
+        new_val = channel
+        confirm_text = f"📢 <b>Must Join Channel UPDATED to:</b> <code>{channel}</code>"
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO bot_settings (key, value) VALUES ('must_join_channel', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+            new_val
+        )
+
+    await message.answer(confirm_text, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+    await state.clear()
 
 @dp.message(AdminState.waiting_for_find_id_query, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_find_id_step(message: Message, state: FSMContext):
