@@ -116,16 +116,19 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
                     if not isinstance(data, dict):
                         return False
 
-                    # Extract status code or status text safely
-                    status_code = str(data.get("StatusCode", "")).strip()
-                    status_text = str(data.get("status") or data.get("AddressStatus") or "").strip().lower()
+                    # Case-insensitive data mapping for MyEmailVerifier response fields
+                    lower_data = {str(k).lower(): str(v).strip().lower() for k, v in data.items()}
 
-                    # MyEmailVerifier uses StatusCode '1' or status 'valid'/'deliverable' for existing emails
-                    if status_code == "1" or status_text in ["valid", "deliverable", "ok", "true"]:
+                    # Extract primary status indicators
+                    status_val = lower_data.get("status") or lower_data.get("addressstatus") or lower_data.get("statuscode") or ""
+                    diagnosis_val = lower_data.get("diagnosis", "")
+
+                    # Valid checks ("valid", "1", "deliverable", "mailbox exists and active")
+                    if status_val in ["valid", "1", "deliverable", "ok", "true"] or "exists" in diagnosis_val or "active" in diagnosis_val:
                         return True
 
-                    # Reject non-existent/invalid emails
-                    print(f"[Validator Debug] Invalid Gmail rejected: {email} | Response: {data}")
+                    # Invalid / Non-existent checks ("invalid", "0", "undeliverable", "catch all", "unknown")
+                    print(f"[Validator Debug] Rejected Email: {email} | Response: {data}")
                     return False
                 else:
                     print(f"MyEmailVerifier HTTP Error: {resp.status}")
