@@ -45,8 +45,11 @@ BANNED_USERS_CACHE = set()
 MUST_JOIN_CHANNEL = None
 BOT_USERNAME = "Gmailpaybot"
 BOT_STATUS = True           # True = ON, False = OFF
+
+# VALIDATOR CONFIGURATION
 EMAILABLE_API_KEY = "05FXQPo7bT7K2ZtZ"
 VALIDATOR_ENABLED = True     # True = Active, False = Deactivated
+VALIDATOR_PROVIDER = "myemailverifier"  # "myemailverifier" or "emailable"
 
 # IN-MEMORY SPEED CACHES
 JOINED_CACHE = {}     # {user_id: timestamp_joined}
@@ -62,11 +65,17 @@ MENU_BUTTONS = {
 }
 
 # ============================================
-# MYEMAILVERIFIER GMAIL VALIDATOR ENGINE
+# DYNAMIC GMAIL VALIDATOR ENGINE
 # ============================================
 
+def get_provider_url() -> str:
+    """Returns the API endpoint format string for the current provider."""
+    if VALIDATOR_PROVIDER == "emailable":
+        return "https://api.emailable.com/v1/verify?email={email}&api_key={key}"
+    return "https://api.myemailverifier.com/api/validate_single.php?apikey={key}&email={email}"
+
 async def is_gmail_registered(email: str, user_id: int = None) -> bool:
-    """Verifies Gmail account existence via MyEmailVerifier API with strict checks."""
+    """Verifies Gmail account existence with auto-cleanup of verification notice."""
     email = email.strip().lower()
     
     if not email.endswith("@gmail.com"):
@@ -88,10 +97,11 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
     if not VALIDATOR_ENABLED:
         return True
 
-    # Send requested verification notification to user
+    # Temporary verification message sent to user
+    verify_msg = None
     if user_id:
         try:
-            await bot.send_message(
+            verify_msg = await bot.send_message(
                 user_id,
                 "📤<i>Verifying Your Gmail From Official Google</i>🚀",
                 parse_mode=ParseMode.HTML
@@ -99,45 +109,49 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
         except Exception:
             pass
 
-    # 3. MyEmailVerifier Single Email Verification API Call
-    url = f"https://api.myemailverifier.com/api/validate_single.php?apikey={urllib.parse.quote(EMAILABLE_API_KEY)}&email={urllib.parse.quote(email)}"
+    # 3. Dynamic Multi-Provider Verification
+    is_valid_email = False
 
     try:
+        if VALIDATOR_PROVIDER == "emailable":
+            url = f"https://api.emailable.com/v1/verify?email={urllib.parse.quote(email)}&api_key={urllib.parse.quote(EMAILABLE_API_KEY)}"
+        else:
+            url = f"https://api.myemailverifier.com/api/validate_single.php?apikey={urllib.parse.quote(EMAILABLE_API_KEY)}&email={urllib.parse.quote(email)}"
+
         async with aiohttp.ClientSession() as session:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=12.0)) as resp:
                 if resp.status == 200:
                     raw_text = await resp.text()
-                    
                     try:
                         data = json.loads(raw_text) if isinstance(raw_text, str) else await resp.json()
                     except Exception:
                         data = await resp.json()
 
-                    if not isinstance(data, dict):
-                        return False
+                    if isinstance(data, dict):
+                        lower_data = {str(k).lower(): str(v).strip().lower() for k, v in data.items()}
 
-                    # Case-insensitive data mapping for MyEmailVerifier response fields
-                    lower_data = {str(k).lower(): str(v).strip().lower() for k, v in data.items()}
-
-                    # Extract primary status indicators
-                    status_val = lower_data.get("status") or lower_data.get("addressstatus") or lower_data.get("statuscode") or ""
-                    diagnosis_val = lower_data.get("diagnosis", "")
-
-                    # Valid checks ("valid", "1", "deliverable", "mailbox exists and active")
-                    if status_val in ["valid", "1", "deliverable", "ok", "true"] or "exists" in diagnosis_val or "active" in diagnosis_val:
-                        return True
-
-                    # Invalid / Non-existent checks ("invalid", "0", "undeliverable", "catch all", "unknown")
-                    print(f"[Validator Debug] Rejected Email: {email} | Response: {data}")
-                    return False
+                        if VALIDATOR_PROVIDER == "emailable":
+                            state = lower_data.get("state", "")
+                            if state == "deliverable":
+                                is_valid_email = True
+                        else: # myemailverifier
+                            status_val = lower_data.get("status") or lower_data.get("addressstatus") or lower_data.get("statuscode") or ""
+                            diagnosis_val = lower_data.get("diagnosis", "")
+                            if status_val in ["valid", "1", "deliverable", "ok", "true"] or "exists" in diagnosis_val or "active" in diagnosis_val:
+                                is_valid_email = True
                 else:
-                    print(f"MyEmailVerifier HTTP Error: {resp.status}")
-                    return False
+                    print(f"Validator HTTP Error ({VALIDATOR_PROVIDER}): {resp.status}")
     except Exception as e:
-        print(f"MyEmailVerifier Connection Exception: {e}")
-        return False
+        print(f"Validator Exception ({VALIDATOR_PROVIDER}): {e}")
 
-    return False
+    # Auto-delete the "Verifying..." message to keep chat clean
+    if verify_msg:
+        try:
+            await verify_msg.delete()
+        except Exception:
+            pass
+
+    return is_valid_email
 
 # ============================================
 # DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
@@ -292,7 +306,7 @@ async def init_db():
         ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id FROM banned_users")
         BANNED_USERS_CACHE = {r['user_id'] for r in rows}
@@ -309,6 +323,10 @@ async def load_settings_and_cache():
 
         val_enabled = await conn.fetchval("SELECT value FROM bot_settings WHERE key='validator_enabled'")
         VALIDATOR_ENABLED = (val_enabled != 'off')
+
+        provider_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='validator_provider'")
+        if provider_val:
+            VALIDATOR_PROVIDER = provider_val
 
     try:
         me = await bot.get_me()
@@ -555,12 +573,18 @@ def get_validator_admin_inline_keyboard():
         style="primary"
     )
     kb.button(
+        text="🔄 Change Provider", 
+        callback_data="admin_validator_change_provider", 
+        icon_custom_emoji_id="5893365462837760511", 
+        style="primary"
+    )
+    kb.button(
         text=status_toggle_text, 
         callback_data="admin_validator_toggle_status", 
         icon_custom_emoji_id="6217663806110175239", 
         style=status_style
     )
-    kb.adjust(2)
+    kb.adjust(2, 1)
     return kb.as_markup()
 
 def get_unassign_inline_keyboard():
@@ -1328,19 +1352,9 @@ async def process_sell_username(message: Message, state: FSMContext):
     else:
         username = username_input
 
-    # Real-Time Verification with MyEmailVerifier
-    is_valid = await is_gmail_registered(username, user_id=message.from_user.id)
-    if not is_valid:
-        await message.answer(
-            f"❌ This Gmail account ({username}) does not exist on Google!\n\n"
-            f"Please Provide Valid Gmail Username, then try again.",
-            parse_mode=ParseMode.HTML,
-            reply_markup=get_back_inline_keyboard()
-        )
-        return
-
     search_pattern = f"%{username.lower()}%"
 
+    # FIRST: Check database to save API credits
     async with db_pool.acquire() as conn:
         existing_sell = await conn.fetchval(
             "SELECT id FROM pending_sells WHERE LOWER(details) LIKE $1",
@@ -1358,6 +1372,17 @@ async def process_sell_username(message: Message, state: FSMContext):
             reply_markup=get_main_menu_keyboard()
         )
         await state.clear()
+        return
+
+    # SECOND: Perform Real-Time Verification via API only if not in database
+    is_valid = await is_gmail_registered(username, user_id=message.from_user.id)
+    if not is_valid:
+        await message.answer(
+            f"❌ This Gmail account ({username}) does not exist on Google!\n\n"
+            f"Please Provide Valid Gmail Username, then try again.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_back_inline_keyboard()
+        )
         return
 
     await state.update_data(sell_username=username)
@@ -1471,12 +1496,16 @@ async def admin_btn_validator_menu(message: Message, state: FSMContext):
     await state.clear()
     
     val_status_str = "🟢 <b>Active</b>" if VALIDATOR_ENABLED else "🔴 <b>Deactivated</b>"
-    
+    provider_name = "Emailable" if VALIDATOR_PROVIDER == "emailable" else "MyEmailVerifier"
+    provider_url = get_provider_url()
+
     text = (
         f"⚙️ <b>Gmail Validator Management</b>\n\n"
+        f"🌐 <b>Current Provider:</b> <code>{provider_name}</code>\n"
+        f"🔗 <b>Provider Endpoint:</b> <code>{provider_url}</code>\n"
         f"🔑 <b>Current API Key:</b> <code>{EMAILABLE_API_KEY}</code>\n"
         f"📌 <b>Validator Status:</b> {val_status_str}\n\n"
-        f"Use the buttons below to configure the MyEmailVerifier validator:"
+        f"Use the buttons below to configure the email validator:"
     )
     
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_validator_admin_inline_keyboard())
@@ -1491,11 +1520,16 @@ async def cb_admin_validator_toggle_status(call: CallbackQuery):
         await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('validator_enabled', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
 
     status_text = "🟢 <b>Active</b>" if VALIDATOR_ENABLED else "🔴 <b>Deactivated</b>"
+    provider_name = "Emailable" if VALIDATOR_PROVIDER == "emailable" else "MyEmailVerifier"
+    provider_url = get_provider_url()
+
     text = (
         f"⚙️ <b>Gmail Validator Management</b>\n\n"
+        f"🌐 <b>Current Provider:</b> <code>{provider_name}</code>\n"
+        f"🔗 <b>Provider Endpoint:</b> <code>{provider_url}</code>\n"
         f"🔑 <b>Current API Key:</b> <code>{EMAILABLE_API_KEY}</code>\n"
         f"📌 <b>Validator Status:</b> {status_text}\n\n"
-        f"Use the buttons below to configure the MyEmailVerifier validator:"
+        f"Use the buttons below to configure the email validator:"
     )
 
     try:
@@ -1508,6 +1542,37 @@ async def cb_admin_validator_toggle_status(call: CallbackQuery):
     except Exception:
         pass
 
+@dp.callback_query(F.data == "admin_validator_change_provider")
+async def cb_admin_validator_change_provider(call: CallbackQuery):
+    global VALIDATOR_PROVIDER
+    VALIDATOR_PROVIDER = "emailable" if VALIDATOR_PROVIDER == "myemailverifier" else "myemailverifier"
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('validator_provider', $1) ON CONFLICT (key) DO UPDATE SET value = $1", VALIDATOR_PROVIDER)
+
+    status_text = "🟢 <b>Active</b>" if VALIDATOR_ENABLED else "🔴 <b>Deactivated</b>"
+    provider_name = "Emailable" if VALIDATOR_PROVIDER == "emailable" else "MyEmailVerifier"
+    provider_url = get_provider_url()
+
+    text = (
+        f"⚙️ <b>Gmail Validator Management</b>\n\n"
+        f"🌐 <b>Current Provider:</b> <code>{provider_name}</code>\n"
+        f"🔗 <b>Provider Endpoint:</b> <code>{provider_url}</code>\n"
+        f"🔑 <b>Current API Key:</b> <code>{EMAILABLE_API_KEY}</code>\n"
+        f"📌 <b>Validator Status:</b> {status_text}\n\n"
+        f"Use the buttons below to configure the email validator:"
+    )
+
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_validator_admin_inline_keyboard())
+    except Exception:
+        pass
+
+    try:
+        await call.answer(f"Switched provider to {provider_name}!", show_alert=True)
+    except Exception:
+        pass
+
 @dp.callback_query(F.data == "admin_validator_change_key")
 async def cb_admin_validator_change_key(call: CallbackQuery, state: FSMContext):
     try:
@@ -1515,10 +1580,11 @@ async def cb_admin_validator_change_key(call: CallbackQuery, state: FSMContext):
     except Exception:
         pass
 
+    provider_name = "Emailable" if VALIDATOR_PROVIDER == "emailable" else "MyEmailVerifier"
+
     await state.set_state(AdminState.waiting_for_validator_key)
     await call.message.answer(
-        "🔑 <b>Send the new MyEmailVerifier API key:</b>\n\n"
-        "<i>Example: <code>05FXQPo7bT7K2ZtZ</code></i>",
+        f"🔑 <b>Send the new API key for {provider_name}:</b>",
         parse_mode=ParseMode.HTML
     )
 
@@ -1532,8 +1598,10 @@ async def process_change_validator_key(message: Message, state: FSMContext):
     async with db_pool.acquire() as conn:
         await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('emailable_api_key', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_key)
 
+    provider_name = "Emailable" if VALIDATOR_PROVIDER == "emailable" else "MyEmailVerifier"
+
     await message.answer(
-        f"✅ <b>MyEmailVerifier API Key Updated Successfully!</b>\n\n"
+        f"✅ <b>{provider_name} API Key Updated Successfully!</b>\n\n"
         f"🔑 <b>New Key:</b> <code>{new_key}</code>",
         parse_mode=ParseMode.HTML,
         reply_markup=get_admin_menu_keyboard()
@@ -2569,7 +2637,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
         email = title.replace("Login to ", "").strip()
         password = "TaskVerse@#"
 
-    # Real-Time Verification with MyEmailVerifier
+    # Real-Time Verification with MyEmailVerifier/Emailable
     is_valid = await is_gmail_registered(email, user_id=user_id)
     if not is_valid:
         await message.answer(
