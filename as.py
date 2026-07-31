@@ -5,6 +5,7 @@ from threading import Thread
 import urllib.parse
 import time
 import re
+import json
 from flask import Flask
 import aiohttp
 
@@ -103,19 +104,38 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8.0)) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
-                    status_val = str(data.get("StatusCode", "") or data.get("status", "")).lower()
-                    
-                    # MyEmailVerifier returns "1" for Valid/Deliverable
-                    if status_val in ["1", "valid", "deliverable"]:
+                    raw_text = await resp.text()
+                    try:
+                        data = json.loads(raw_text) if isinstance(raw_text, str) else await resp.json()
+                    except Exception:
+                        data = await resp.json()
+
+                    if not isinstance(data, dict):
                         return True
-                    elif status_val in ["0", "invalid", "undeliverable"]:
+
+                    # Check for StatusCode / status / AddressStatus
+                    status_val = str(
+                        data.get("StatusCode") or 
+                        data.get("status") or 
+                        data.get("AddressStatus") or 
+                        ""
+                    ).strip().lower()
+
+                    # Check for explicit invalid responses (0, invalid, undeliverable, disabled, non_existing)
+                    if status_val in ["0", "invalid", "undeliverable", "disabled", "false", "failed"]:
                         return False
-                    else:
-                        # Fallback safely if response state is unknown or risky
+
+                    # Check for explicit valid responses (1, valid, deliverable)
+                    if status_val in ["1", "valid", "deliverable", "true"]:
                         return True
+
+                    # Fallback check on 'response_code' or 'valid' boolean key
+                    if "valid" in data:
+                        return bool(data["valid"])
+
+                    return True
                 else:
                     print(f"MyEmailVerifier API HTTP Error: {resp.status}")
                     return True
