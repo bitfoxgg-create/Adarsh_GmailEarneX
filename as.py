@@ -616,7 +616,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
     usdt_link_text = "Change USDT BEP-20" if usdt_set else "Link USDT BEP-20"
     
     upi_emoji = "6278557702109013266" if upi_set else "5902449142575141204"
-    usdt_emoji = "5197434882321567830" if upi_set else "5902449142575141204"
+    usdt_emoji = "5197434882321567830" if usdt_set else "5902449142575141204"
 
     kb.button(text=upi_link_text, callback_data="link_upi", icon_custom_emoji_id=upi_emoji, style="primary")
     kb.button(text=usdt_link_text, callback_data="link_usdt", icon_custom_emoji_id=usdt_emoji, style="primary")
@@ -1445,25 +1445,38 @@ async def process_sell_password(message: Message, state: FSMContext):
     await state.clear()
     await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
+@dp.callback_query(F.data == "menu_history")
 @dp.message(Command("history"), StateFilter("*"))
-async def history(message: Message, state: FSMContext):
+async def cb_history(event: CallbackQuery | Message, state: FSMContext):
     await state.clear()
-    user_data = await get_user_data(message.from_user.id)
-    curr = user_data['currency']
+    user_id = event.from_user.id
+    user_data = await get_user_data(user_id)
+    curr = user_data['currency'] if user_data else "USD"
     
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT type, amount, note, created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 10", message.from_user.id)
+        rows = await conn.fetch("SELECT type, amount, note, created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 10", user_id)
+
     if not rows:
-        sent_msg = await message.answer("📭 No transactions found.", reply_markup=get_back_inline_keyboard())
+        text = "📭 No transactions found."
+    else:
+        text = '<tg-emoji emoji-id="5440410042773824003">📜</tg-emoji> <b>Last Transactions</b>\n\n'
+        for r in rows:
+            sign = "+" if r['amount'] >= 0 else ""
+            formatted_amt = format_currency(abs(r['amount']), curr)
+            text += f"• {sign}{formatted_amt} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+
+    if isinstance(event, CallbackQuery):
+        try:
+            await event.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+        except Exception:
+            await event.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+        try:
+            await event.answer()
+        except Exception:
+            pass
+    else:
+        sent_msg = await event.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
         await state.update_data(last_menu_msg_id=sent_msg.message_id)
-        return
-    text = '<tg-emoji emoji-id="5440410042773824003">📜</tg-emoji> <b>Last Transactions</b>\n\n'
-    for r in rows:
-        sign = "+" if r['amount'] >= 0 else ""
-        formatted_amt = format_currency(abs(r['amount']), curr)
-        text += f"• {sign}{formatted_amt} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-    sent_msg = await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
-    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 # ============================================
 # ADMIN PANEL COMMAND & BUTTON HANDLERS
@@ -2120,33 +2133,33 @@ async def set_must_join_command(message: Message, state: FSMContext):
 # ============================================
 
 @dp.message(AdminState.waiting_for_channel_link, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def process_set_must_join_step(message: Message, state: FSMContext):
+async def process_must_join_channel_step(message: Message, state: FSMContext):
     global MUST_JOIN_CHANNEL
     input_text = message.text.strip()
 
-    if input_text.lower() == 'none':
+    if input_text.lower() == "none":
         MUST_JOIN_CHANNEL = None
-        new_val = 'none'
-        confirm_text = "📢 <b>Must Join Channel feature has been DISABLED.</b>"
+        async with db_pool.acquire() as conn:
+            await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('must_join_channel', 'none') ON CONFLICT (key) DO UPDATE SET value = 'none'")
+        await message.answer("✅ <b>Must Join Channel feature has been disabled.</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
     else:
-        if "t.me/" in input_text:
-            channel = "@" + input_text.split("t.me/")[-1].replace("/", "").strip()
-        elif input_text.startswith("@"):
-            channel = input_text
-        else:
-            channel = "@" + input_text
+        channel_val = input_text
+        if "t.me/" in channel_val:
+            channel_val = "@" + channel_val.split("t.me/")[-1].replace("/", "")
+        elif not channel_val.startswith("@"):
+            channel_val = "@" + channel_val
 
-        MUST_JOIN_CHANNEL = channel
-        new_val = channel
-        confirm_text = f"📢 <b>Must Join Channel UPDATED to:</b> <code>{channel}</code>"
+        MUST_JOIN_CHANNEL = channel_val
+        async with db_pool.acquire() as conn:
+            await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('must_join_channel', $1) ON CONFLICT (key) DO UPDATE SET value = $1", channel_val)
 
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO bot_settings (key, value) VALUES ('must_join_channel', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
-            new_val
+        await message.answer(
+            f"✅ <b>Must Join Channel updated successfully!</b>\n\n"
+            f"📢 <b>Channel:</b> <code>{channel_val}</code>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_admin_menu_keyboard()
         )
 
-    await message.answer(confirm_text, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
 @dp.message(AdminState.waiting_for_find_id_query, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
