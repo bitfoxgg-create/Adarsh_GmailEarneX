@@ -61,7 +61,7 @@ MENU_BUTTONS = {
     "➕ Add Task", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
-    "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "⚙️ Validator"
+    "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "⚙️ Validator", "👑 Transfer Admin"
 }
 
 # ============================================
@@ -199,6 +199,7 @@ class AdminState(StatesGroup):
     waiting_for_unassign_user_id = State()
     waiting_for_find_id_query = State()
     waiting_for_validator_key = State()
+    waiting_for_transfer_admin_id = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -306,7 +307,7 @@ async def init_db():
         ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id FROM banned_users")
         BANNED_USERS_CACHE = {r['user_id'] for r in rows}
@@ -327,6 +328,10 @@ async def load_settings_and_cache():
         provider_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='validator_provider'")
         if provider_val:
             VALIDATOR_PROVIDER = provider_val
+
+        admin_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='admin_id'")
+        if admin_val and admin_val.isdigit():
+            ADMIN_ID = int(admin_val)
 
     try:
         me = await bot.get_me()
@@ -557,8 +562,10 @@ def get_admin_menu_keyboard():
     kb.button(text=status_btn_text, style="danger" if BOT_STATUS else "success")
     kb.button(text="⚙️ Validator", style="primary")
     
+    # Transfer Admin button in new row above Main Menu
+    kb.button(text="👑 Transfer Admin", style="danger")
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_validator_admin_inline_keyboard():
@@ -1606,6 +1613,59 @@ async def process_change_validator_key(message: Message, state: FSMContext):
         parse_mode=ParseMode.HTML,
         reply_markup=get_admin_menu_keyboard()
     )
+    await state.clear()
+
+@dp.message(F.text == "👑 Transfer Admin", StateFilter("*"))
+async def admin_btn_transfer_admin(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_transfer_admin_id)
+    await message.answer(
+        "👑 <b>Transfer Admin Privileges</b>\n\n"
+        "Send the numeric **User ID** of the user you want to transfer full adminship to:\n\n"
+        "<i>⚠️ Warning: Once transferred, your current user ID will no longer have access to the admin panel!</i>",
+        parse_mode=ParseMode.MARKDOWN
+    )
+
+@dp.message(AdminState.waiting_for_transfer_admin_id, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_transfer_admin_id_step(message: Message, state: FSMContext):
+    global ADMIN_ID
+    try:
+        new_admin_id = int(message.text.strip())
+        if new_admin_id == message.from_user.id:
+            await message.answer("❌ You are already the admin!", reply_markup=get_admin_menu_keyboard())
+            await state.clear()
+            return
+
+        await ensure_user(new_admin_id)
+
+        # Update database settings and in-memory variable
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO bot_settings (key, value) VALUES ('admin_id', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+                str(new_admin_id)
+            )
+
+        old_admin_id = ADMIN_ID
+        ADMIN_ID = new_admin_id
+
+        await message.answer(
+            f"👑 <b>Adminship Successfully Transferred!</b>\n\n"
+            f"<b>New Admin ID:</b> <code>{new_admin_id}</code>\n"
+            f"You have been demoted to a regular user.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+
+        asyncio.create_task(send_user_notification(
+            new_admin_id,
+            f"👑 <b>Congratulations!</b>\n\nYou have been promoted to the **Full Admin** of Gmail Pay Bot by User ID `{old_admin_id}`.\n\nUse /adminpanel to open the control panel.",
+            parse_mode=ParseMode.MARKDOWN
+        ))
+
+    except ValueError:
+        await message.answer("❌ Invalid User ID. Please enter a valid numeric Telegram ID.", reply_markup=get_admin_menu_keyboard())
+
     await state.clear()
 
 @dp.message(F.text == "➕ Add Task", StateFilter("*"))
