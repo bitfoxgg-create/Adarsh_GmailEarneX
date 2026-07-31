@@ -2318,6 +2318,18 @@ async def process_cut_balance_step(message: Message, state: FSMContext):
 
         invalidate_user_cache(target_id)
         await message.answer(f"✅ **Deducted ₹{amount:.2f} from User `{target_id}`'s balance.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        
+        # FIXED ERROR 1: Send notification to the user whose balance was deducted
+        async with db_pool.acquire() as conn:
+            target_user_data = await conn.fetchrow("SELECT currency FROM users WHERE user_id=$1", target_id)
+            target_curr = target_user_data['currency'] if target_user_data else "USD"
+        
+        formatted_deduct_amt = format_currency(amount, target_curr)
+        asyncio.create_task(send_user_notification(
+            target_id,
+            f"⚠️ <b>Admin deducted from your balance!</b>\n-{formatted_deduct_amt} deducted from your account.",
+            parse_mode=ParseMode.HTML
+        ))
     except Exception as e:
         await message.answer(f"❌ Invalid format or error: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
     await state.clear()
@@ -2652,7 +2664,6 @@ async def choose_withdraw_method_handler(call: CallbackQuery):
 
 @dp.callback_query(F.data == "withdraw_upi")
 async def inline_withdraw_upi_handler(call: CallbackQuery):
-    await call.answer()
     user_id = call.from_user.id
     user_data = await get_user_data(user_id)
     bal = user_data['balance'] if user_data else 0.0
@@ -2667,8 +2678,11 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
     if bal < MIN_WITHDRAW:
         min_withdraw_str = format_currency(MIN_WITHDRAW, curr)
         bal_str = format_currency(bal, curr)
+        # FIXED ERROR 2: Display proper currency minimum notification without freezing button
         await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
         return
+
+    await call.answer()
 
     async with db_pool.acquire() as conn:
         existing_pending = await conn.fetchrow(
@@ -2717,7 +2731,6 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
 
 @dp.callback_query(F.data == "withdraw_usdt")
 async def inline_withdraw_usdt_handler(call: CallbackQuery):
-    await call.answer()
     user_id = call.from_user.id
     user_data = await get_user_data(user_id)
     bal = user_data['balance'] if user_data else 0.0
@@ -2732,8 +2745,11 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
     if bal < MIN_WITHDRAW:
         min_withdraw_str = format_currency(MIN_WITHDRAW, curr)
         bal_str = format_currency(bal, curr)
+        # FIXED ERROR 2: Display proper currency minimum notification without freezing button
         await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
         return
+
+    await call.answer()
 
     async with db_pool.acquire() as conn:
         existing_pending = await conn.fetchrow(
