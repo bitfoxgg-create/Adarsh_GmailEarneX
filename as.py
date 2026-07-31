@@ -200,6 +200,7 @@ class AdminState(StatesGroup):
     waiting_for_find_id_query = State()
     waiting_for_validator_key = State()
     waiting_for_transfer_admin_id = State()
+    waiting_for_support_reply = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -1477,6 +1478,132 @@ async def cb_history(event: CallbackQuery | Message, state: FSMContext):
     else:
         sent_msg = await event.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
         await state.update_data(last_menu_msg_id=sent_msg.message_id)
+
+@dp.callback_query(F.data == "menu_support")
+async def cb_support_start(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await state.set_state(UserState.waiting_for_support)
+    txt = (
+        '🛠 <b>Support Center</b>\n\n'
+        'Please type and send your question, issue, or message below.\n\n'
+        'An admin will be notified and respond to you as soon as possible.'
+    )
+    try:
+        await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
+    except Exception:
+        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
+@dp.message(UserState.waiting_for_support, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS) if F.text else True)
+async def process_user_support_message(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    username = f"@{message.from_user.username}" if message.from_user.username else f"ID: {user_id}"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="💬 Reply User", 
+            callback_data=f"admin_reply_support:{user_id}",
+            icon_custom_emoji_id="5870458774455587120",
+            style="primary"
+        )
+    ]])
+
+    admin_ticket_text = (
+        f'🛠 <b>New Support Request</b>\n\n'
+        f'<b>From User:</b> {username} (<code>{user_id}</code>)\n'
+        f'<b>Date:</b> {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")}\n'
+    )
+
+    try:
+        if message.photo:
+            await bot.send_photo(
+                ADMIN_ID, 
+                photo=message.photo[-1].file_id, 
+                caption=admin_ticket_text + f"\n<b>Message:</b> {message.caption or 'Photo Proof'}",
+                reply_markup=kb, 
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await bot.send_message(
+                ADMIN_ID, 
+                admin_ticket_text + f"\n<b>Message:</b> {message.text}", 
+                reply_markup=kb, 
+                parse_mode=ParseMode.HTML
+            )
+        
+        await message.answer(
+            "✅ <b>Your support message has been delivered to our team!</b>\n\nWe will get back to you shortly.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_main_menu_keyboard()
+        )
+    except Exception as e:
+        print(f"Error forwarding support message: {e}")
+        await message.answer("❌ Failed to send your support message. Please try again later.", reply_markup=get_main_menu_keyboard())
+
+    await state.clear()
+
+@dp.callback_query(F.data.startswith("admin_reply_support:"))
+async def cb_admin_reply_support(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    target_user_id = int(call.data.split(":")[1])
+    await state.set_state(AdminState.waiting_for_support_reply)
+    await state.update_data(reply_target_user_id=target_user_id)
+
+    try:
+        await call.answer()
+    except Exception:
+        pass
+
+    await call.message.answer(
+        f"✉️ <b>Send your reply to User <code>{target_user_id}</code> below:</b>",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_support_reply, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS) if F.text else True)
+async def process_admin_support_reply(message: Message, state: FSMContext):
+    data = await state.get_data()
+    target_user_id = data.get('reply_target_user_id')
+
+    if not target_user_id:
+        await message.answer("❌ Error: Reply target lost.", reply_markup=get_admin_menu_keyboard())
+        await state.clear()
+        return
+
+    reply_header = "🛠 <b>Support Reply from Admin:</b>\n\n"
+
+    try:
+        if message.photo:
+            await bot.send_photo(
+                target_user_id,
+                photo=message.photo[-1].file_id,
+                caption=reply_header + (message.caption or ""),
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await bot.send_message(
+                target_user_id,
+                reply_header + message.text,
+                parse_mode=ParseMode.HTML
+            )
+
+        await message.answer(
+            f"✅ <b>Reply successfully sent to User <code>{target_user_id}</code>!</b>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_admin_menu_keyboard()
+        )
+    except Exception as e:
+        await message.answer(
+            f"❌ Failed to send reply to User <code>{target_user_id}</code>.\n\nError: <code>{e}</code>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_admin_menu_keyboard()
+        )
+
+    await state.clear()
 
 # ============================================
 # ADMIN PANEL COMMAND & BUTTON HANDLERS
