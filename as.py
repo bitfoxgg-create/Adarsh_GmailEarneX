@@ -25,6 +25,7 @@ from aiogram.types import (
     ChatMemberUpdated
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 # ============================================
 # CONFIGURATION & INITIALIZATION
@@ -2338,6 +2339,69 @@ async def admin_btn_broadcast(message: Message, state: FSMContext):
         return
     await state.set_state(AdminState.waiting_for_broadcast)
     await message.answer("📢 Send or forward the broadcast message below:", parse_mode=ParseMode.MARKDOWN)
+
+# ============================================
+# BROADCAST PROCESSOR HANDLER (FIXED)
+# ============================================
+
+@dp.message(AdminState.waiting_for_broadcast, ~F.text.in_(MENU_BUTTONS))
+async def process_broadcast_message(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    async with db_pool.acquire() as conn:
+        users = await conn.fetch("SELECT user_id FROM users")
+
+    if not users:
+        await message.answer("📭 No users found in database to send broadcast.", reply_markup=get_admin_menu_keyboard())
+        await state.clear()
+        return
+
+    total_users = len(users)
+    status_msg = await message.answer(
+        f"⏳ <b>Broadcast in progress...</b>\nTotal targets: <b>{total_users}</b>",
+        parse_mode=ParseMode.HTML
+    )
+
+    success_count = 0
+    fail_count = 0
+
+    for idx, u in enumerate(users, start=1):
+        target_id = u['user_id']
+        try:
+            await bot.copy_message(
+                chat_id=target_id,
+                from_chat_id=message.chat.id,
+                message_id=message.message_id
+            )
+            success_count += 1
+        except TelegramForbiddenError:
+            fail_count += 1
+        except Exception:
+            fail_count += 1
+
+        if idx % 20 == 0 or idx == total_users:
+            try:
+                await status_msg.edit_text(
+                    f"⏳ <b>Broadcasting...</b> ({idx}/{total_users})\n\n"
+                    f"🟢 Success: <b>{success_count}</b>\n"
+                    f"🔴 Failed: <b>{fail_count}</b>",
+                    parse_mode=ParseMode.HTML
+                )
+            except Exception:
+                pass
+
+        await asyncio.sleep(0.04)  # Prevent rate limits
+
+    await status_msg.edit_text(
+        f"✅ <b>Broadcast Completed!</b>\n\n"
+        f"📊 <b>Total Users Processed:</b> {total_users}\n"
+        f"🟢 <b>Successfully Sent:</b> {success_count}\n"
+        f"🔴 <b>Failed / Blocked:</b> {fail_count}",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_admin_menu_keyboard()
+    )
+    await state.clear()
 
 @dp.message(F.text == "🏷 Update All Rewards", StateFilter("*"))
 async def admin_btn_update_rewards(message: Message, state: FSMContext):
