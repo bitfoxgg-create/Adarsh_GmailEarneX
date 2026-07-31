@@ -44,7 +44,7 @@ BANNED_USERS_CACHE = set()
 MUST_JOIN_CHANNEL = None
 BOT_USERNAME = "Gmailpaybot"
 BOT_STATUS = True           # True = ON, False = OFF
-EMAILABLE_API_KEY = "live_81463a2a3a171f9cf65e"
+EMAILABLE_API_KEY = "05FXQPo7bT7K2ZtZ"
 VALIDATOR_ENABLED = True     # True = Active, False = Deactivated
 
 # IN-MEMORY SPEED CACHES
@@ -61,11 +61,11 @@ MENU_BUTTONS = {
 }
 
 # ============================================
-# EMAILABLE GMAIL VALIDATOR ENGINE
+# MYEMAILVERIFIER GMAIL VALIDATOR ENGINE
 # ============================================
 
-async def is_gmail_registered(email: str) -> bool:
-    """Verifies Gmail account existence via Emailable API with strict local syntax checks."""
+async def is_gmail_registered(email: str, user_id: int = None) -> bool:
+    """Verifies Gmail account existence via MyEmailVerifier API with strict local syntax checks."""
     email = email.strip().lower()
     
     if not email.endswith("@gmail.com"):
@@ -87,28 +87,40 @@ async def is_gmail_registered(email: str) -> bool:
     if not VALIDATOR_ENABLED:
         return True
 
-    # 3. Emailable REST API Single Email Verification
-    url = f"https://api.emailable.com/v1/verify?email={urllib.parse.quote(email)}&api_key={EMAILABLE_API_KEY}"
+    # Send requested verification notification to user if user_id is passed
+    if user_id:
+        try:
+            await bot.send_message(
+                user_id,
+                "📤<i>Verifying Your Gmail From Official Google</i>🚀",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            pass
+
+    # 3. MyEmailVerifier Single Email Verification API
+    url = f"https://api.myemailverifier.com/api/validate_single.php?apikey={urllib.parse.quote(EMAILABLE_API_KEY)}&email={urllib.parse.quote(email)}"
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5.0)) as resp:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8.0)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    state = data.get("state")
+                    status_val = str(data.get("StatusCode", "") or data.get("status", "")).lower()
                     
-                    if state == "deliverable":
+                    # MyEmailVerifier returns "1" for Valid/Deliverable
+                    if status_val in ["1", "valid", "deliverable"]:
                         return True
-                    elif state == "undeliverable":
+                    elif status_val in ["0", "invalid", "undeliverable"]:
                         return False
                     else:
-                        # If state is risky or unknown, allow submission safely
+                        # Fallback safely if response state is unknown or risky
                         return True
                 else:
-                    print(f"Emailable API HTTP Error: {resp.status}")
+                    print(f"MyEmailVerifier API HTTP Error: {resp.status}")
                     return True
     except Exception as e:
-        print(f"Emailable lookup exception: {e}")
+        print(f"MyEmailVerifier lookup exception: {e}")
         return True
 
     return True
@@ -509,7 +521,6 @@ def get_admin_menu_keyboard():
     kb.button(text="📊 View Stats", style="primary")
     kb.button(text="📢 Must Join Channel", style="primary")
     
-    # Bot Status button and Validator button in same row above Main Menu
     status_btn_text = "🟢 Bot Status: ON" if BOT_STATUS else "🔴 Bot Status: OFF"
     kb.button(text=status_btn_text, style="danger" if BOT_STATUS else "success")
     kb.button(text="⚙️ Validator", style="primary")
@@ -1303,8 +1314,8 @@ async def process_sell_username(message: Message, state: FSMContext):
     else:
         username = username_input
 
-    # Emailable Real-Time Gmail Verification
-    is_valid = await is_gmail_registered(username)
+    # Real-Time Verification with MyEmailVerifier
+    is_valid = await is_gmail_registered(username, user_id=message.from_user.id)
     if not is_valid:
         await message.answer(
             f"❌ This Gmail account ({username}) does not exist on Google!\n\n"
@@ -1451,7 +1462,7 @@ async def admin_btn_validator_menu(message: Message, state: FSMContext):
         f"⚙️ <b>Gmail Validator Management</b>\n\n"
         f"🔑 <b>Current API Key:</b> <code>{EMAILABLE_API_KEY}</code>\n"
         f"📌 <b>Validator Status:</b> {val_status_str}\n\n"
-        f"Use the buttons below to configure the Emailable validator:"
+        f"Use the buttons below to configure the MyEmailVerifier validator:"
     )
     
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_validator_admin_inline_keyboard())
@@ -1470,7 +1481,7 @@ async def cb_admin_validator_toggle_status(call: CallbackQuery):
         f"⚙️ <b>Gmail Validator Management</b>\n\n"
         f"🔑 <b>Current API Key:</b> <code>{EMAILABLE_API_KEY}</code>\n"
         f"📌 <b>Validator Status:</b> {status_text}\n\n"
-        f"Use the buttons below to configure the Emailable validator:"
+        f"Use the buttons below to configure the MyEmailVerifier validator:"
     )
 
     try:
@@ -1492,8 +1503,8 @@ async def cb_admin_validator_change_key(call: CallbackQuery, state: FSMContext):
 
     await state.set_state(AdminState.waiting_for_validator_key)
     await call.message.answer(
-        "🔑 <b>Send the new Emailable API key:</b>\n\n"
-        "<i>Example: <code>live_81463a2a3a171f9cf65e</code></i>",
+        "🔑 <b>Send the new MyEmailVerifier API key:</b>\n\n"
+        "<i>Example: <code>05FXQPo7bT7K2ZtZ</code></i>",
         parse_mode=ParseMode.HTML
     )
 
@@ -1508,7 +1519,7 @@ async def process_change_validator_key(message: Message, state: FSMContext):
         await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('emailable_api_key', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_key)
 
     await message.answer(
-        f"✅ <b>Emailable API Key Updated Successfully!</b>\n\n"
+        f"✅ <b>MyEmailVerifier API Key Updated Successfully!</b>\n\n"
         f"🔑 <b>New Key:</b> <code>{new_key}</code>",
         parse_mode=ParseMode.HTML,
         reply_markup=get_admin_menu_keyboard()
@@ -2544,8 +2555,8 @@ async def handle_task_submission(message: Message, state: FSMContext):
         email = title.replace("Login to ", "").strip()
         password = "TaskVerse@#"
 
-    # Emailable Real-Time Gmail Verification
-    is_valid = await is_gmail_registered(email)
+    # Real-Time Verification with MyEmailVerifier
+    is_valid = await is_gmail_registered(email, user_id=user_id)
     if not is_valid:
         await message.answer(
             f"❌ <b>This Gmail account (<code>{email}</code>) does not exist on Google!</b>\n\n"
