@@ -43,7 +43,7 @@ dp = Dispatcher(storage=MemoryStorage())
 db_pool = None
 BANNED_USERS_CACHE = set()
 MUST_JOIN_CHANNEL = None
-BOT_USERNAME = "Gmailpaybot"
+BOT_USERNAME = "GmailEarnexBot"
 BOT_STATUS = True           # True = ON, False = OFF
 
 # VALIDATOR CONFIGURATION
@@ -497,7 +497,7 @@ def get_main_menu_keyboard():
 
 def get_referral_inline_keyboard(user_id: int):
     invite_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
-    custom_share_text = "🚀Join Earnex Bot and Start Earning Money!✅"
+    custom_share_text = "🚀Join Gmail Earnex and Start Earning Money!✅"
     share_url = f"https://t.me/share/url?url={urllib.parse.quote(invite_link)}&text={urllib.parse.quote(custom_share_text)}"
     
     kb = InlineKeyboardBuilder()
@@ -562,7 +562,6 @@ def get_admin_menu_keyboard():
     kb.button(text=status_btn_text, style="danger" if BOT_STATUS else "success")
     kb.button(text="⚙️ Validator", style="primary")
     
-    # Transfer Admin button in new row above Main Menu
     kb.button(text="👑 Transfer Admin", style="danger")
     kb.button(text="🏠 Main Menu", style="primary")
     kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
@@ -821,7 +820,7 @@ async def start(message: Message, state: FSMContext, command: CommandObject = No
         
         if is_new_user:
             text = (
-                '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome to Gmail Pay Bot!</b>\n\n'
+                '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome to Gmail Earnex!</b>\n\n'
                 '💵 <b>Default Currency Selected:</b> <code>USD ($)</code>\n'
                 '⚙️ <i>You can change your currency anytime in <b>Settings</b>.</i>\n\n'
                 'Choose an option from the menu below:'
@@ -1622,9 +1621,9 @@ async def admin_btn_transfer_admin(message: Message, state: FSMContext):
     await state.set_state(AdminState.waiting_for_transfer_admin_id)
     await message.answer(
         "👑 <b>Transfer Admin Privileges</b>\n\n"
-        "Send the numeric **User ID** of the user you want to transfer full adminship to:\n\n"
+        "Send the numeric <b>User ID</b> of the user you want to transfer full adminship to:\n\n"
         "<i>⚠️ Warning: Once transferred, your current user ID will no longer have access to the admin panel!</i>",
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.HTML
     )
 
 @dp.message(AdminState.waiting_for_transfer_admin_id, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
@@ -1659,8 +1658,8 @@ async def process_transfer_admin_id_step(message: Message, state: FSMContext):
 
         asyncio.create_task(send_user_notification(
             new_admin_id,
-            f"👑 <b>Congratulations!</b>\n\nYou have been promoted to the **Full Admin** of Gmail Pay Bot by User ID `{old_admin_id}`.\n\nUse /adminpanel to open the control panel.",
-            parse_mode=ParseMode.MARKDOWN
+            f"👑 <b>Congratulations!</b>\n\nYou have been promoted to the <b>Full Admin</b> of Gmail Earnex by User ID <code>{old_admin_id}</code>.\n\nUse /adminpanel to open the control panel.",
+            parse_mode=ParseMode.HTML
         ))
 
     except ValueError:
