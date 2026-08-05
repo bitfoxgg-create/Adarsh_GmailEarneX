@@ -2187,8 +2187,52 @@ async def admin_btn_unassign_tasks(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "unassign_by_user_id")
 async def start_unassign_user_id(call: CallbackQuery, state: FSMContext):
     await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
     await state.set_state(AdminState.waiting_for_unassign_user_id)
     await call.message.answer("👤 Send the numeric **User ID** whose task you want to unassign:", parse_mode=ParseMode.MARKDOWN)
+
+@dp.callback_query(F.data == "unassign_all_users")
+async def start_unassign_all_users(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+
+    async with db_pool.acquire() as conn:
+        active_assignments = await conn.fetch('''
+            SELECT ta.task_id, ta.user_id 
+            FROM task_assignments ta
+            JOIN tasks t ON ta.task_id = t.id
+            WHERE t.status != 'pending_review'
+        ''')
+
+        if not active_assignments:
+            try:
+                await call.message.edit_text("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML)
+            except Exception:
+                await call.message.answer("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML)
+            return
+
+        task_ids = [r['task_id'] for r in active_assignments]
+        user_ids = [r['user_id'] for r in active_assignments]
+
+        async with conn.transaction():
+            await conn.execute("DELETE FROM task_assignments WHERE task_id = ANY($1::int[])", task_ids)
+            await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids)
+
+    count = len(task_ids)
+    try:
+        await call.message.edit_text(f"✅ <b>Successfully unassigned {count} active task(s) from all users and returned them to the available pool.</b>", parse_mode=ParseMode.HTML)
+    except Exception:
+        await call.message.answer(f"✅ <b>Successfully unassigned {count} active task(s) from all users and returned them to the available pool.</b>", parse_mode=ParseMode.HTML)
+
+    for uid in set(user_ids):
+        asyncio.create_task(send_user_notification(
+            uid,
+            '⚠️ <b>Your active task has been unassigned by the admin and returned to the pool.</b>',
+            parse_mode=ParseMode.HTML
+        ))
 
 @dp.message(AdminState.waiting_for_unassign_user_id, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_unassign_user_id_step(message: Message, state: FSMContext):
