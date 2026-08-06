@@ -47,6 +47,11 @@ MUST_JOIN_CHANNEL = None
 BOT_USERNAME = "GmailEarnexBot"
 BOT_STATUS = True           # True = ON, False = OFF
 
+# GLOBAL DYNAMIC RATES (INR)
+DEFAULT_TASK_RATE = 50.0
+GMAIL_SELL_RATE = 30.0
+MIN_WITHDRAWAL_AMT = 150.0
+
 # VALIDATOR CONFIGURATION
 EMAILABLE_API_KEY = "05FXQPo7bT7K2ZtZ"
 VALIDATOR_ENABLED = True     # True = Active, False = Deactivated
@@ -61,7 +66,7 @@ MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "👥 Referrals", "📁 My Accounts", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
     "➕ Add Task", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
-    "📢 Broadcast", "🏷 Update All Rewards", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
+    "📢 Broadcast", "⚙️ Change Values", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "⚙️ Validator", "👑 Transfer Admin"
 }
 
@@ -192,7 +197,6 @@ class AdminState(StatesGroup):
     waiting_for_unban_user = State()
     waiting_for_add_task = State()
     waiting_for_bulk_add_task = State()
-    waiting_for_update_rewards = State()
     waiting_for_remove_task = State()
     waiting_for_broadcast = State()
     waiting_for_user_transactions = State()
@@ -203,6 +207,9 @@ class AdminState(StatesGroup):
     waiting_for_validator_key = State()
     waiting_for_transfer_admin_id = State()
     waiting_for_support_reply = State()
+    waiting_for_change_tasks_rate = State()
+    waiting_for_change_sell_rate = State()
+    waiting_for_change_min_withdraw = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -311,6 +318,8 @@ async def init_db():
 
 async def load_settings_and_cache():
     global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
+    global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT
+    
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id FROM banned_users")
         BANNED_USERS_CACHE = {r['user_id'] for r in rows}
@@ -335,6 +344,18 @@ async def load_settings_and_cache():
         admin_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='admin_id'")
         if admin_val and admin_val.isdigit():
             ADMIN_ID = int(admin_val)
+
+        task_rate_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='default_task_rate'")
+        if task_rate_val:
+            DEFAULT_TASK_RATE = float(task_rate_val)
+
+        sell_rate_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='gmail_sell_rate'")
+        if sell_rate_val:
+            GMAIL_SELL_RATE = float(sell_rate_val)
+
+        min_w_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='min_withdrawal_rate'")
+        if min_w_val:
+            MIN_WITHDRAWAL_AMT = float(min_w_val)
 
     try:
         me = await bot.get_me()
@@ -572,7 +593,7 @@ def get_admin_menu_keyboard():
     kb.button(text="🚫 Ban User", style="danger")
     kb.button(text="✅ Unban User", style="success")
     kb.button(text="📢 Broadcast", style="primary")
-    kb.button(text="🏷 Update All Rewards", style="primary")
+    kb.button(text="⚙️ Change Values", style="primary")
     kb.button(text="🗑 Remove Task", style="danger")
     kb.button(text="💳 Transactions", style="primary")
     kb.button(text="📊 View Stats", style="primary")
@@ -586,6 +607,29 @@ def get_admin_menu_keyboard():
     kb.button(text="🏠 Main Menu", style="primary")
     kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup(resize_keyboard=True)
+
+def get_change_values_inline_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="1. Change Tasks Rate",
+        callback_data="admin_change_tasks_rate",
+        icon_custom_emoji_id="5417924076503062111",
+        style="primary"
+    )
+    kb.button(
+        text="2. Change Sell Rate",
+        callback_data="admin_change_sell_rate",
+        icon_custom_emoji_id="5377548235709619284",
+        style="primary"
+    )
+    kb.button(
+        text="3. Change Min. Withdrawal",
+        callback_data="admin_change_min_withdraw",
+        icon_custom_emoji_id="5444856076954520455",
+        style="primary"
+    )
+    kb.adjust(1, 1, 1)
+    return kb.as_markup()
 
 def get_validator_admin_inline_keyboard():
     kb = InlineKeyboardBuilder()
@@ -1315,7 +1359,7 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await state.set_state(UserState.selling_username)
     user_data = await get_user_data(call.from_user.id)
-    rate_str = format_currency(30.0, user_data['currency'])
+    rate_str = format_currency(GMAIL_SELL_RATE, user_data['currency'])
     txt = (
         f'<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>Sell Price {rate_str}/Gmail</b>\n\n'
         '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail <b>Username</b> (e.g., <code>example@gmail.com</code>):'
@@ -1382,7 +1426,7 @@ async def process_sell_password(message: Message, state: FSMContext):
     data = await state.get_data()
     username = data.get('sell_username')
     user_id = message.from_user.id
-    rate = 30.0
+    rate = GMAIL_SELL_RATE
 
     details = f"Username: {username}\nPassword: {password}"
 
@@ -1866,7 +1910,7 @@ async def process_bulk_add_task_step(message: Message, state: FSMContext):
             
             if not existing:
                 password = "TaskVerse@#"
-                default_reward = 50.0 
+                default_reward = DEFAULT_TASK_RATE
                 title = f"Login to {email}"
                 details = f"Email: {email} | Pass: {password}"
                 
@@ -1937,7 +1981,7 @@ async def process_add_task_step(message: Message, state: FSMContext):
 
 async def insert_new_task(message: Message, username: str):
     password = "TaskVerse@#"
-    default_reward = 50.0 
+    default_reward = DEFAULT_TASK_RATE
     title = f"Login to {username}"
     details = f"Email: {username} | Pass: {password}"
     
@@ -2597,21 +2641,115 @@ async def process_broadcast_message(message: Message, state: FSMContext):
     )
     await state.clear()
 
-@dp.message(F.text == "🏷 Update All Rewards", StateFilter("*"))
-async def admin_btn_update_rewards(message: Message, state: FSMContext):
+@dp.message(F.text == "⚙️ Change Values", StateFilter("*"))
+async def admin_btn_change_values(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
-    await state.set_state(AdminState.waiting_for_update_rewards)
-    await message.answer("💰 Send the new reward amount for ALL tasks (e.g. `40.0`):", parse_mode=ParseMode.MARKDOWN)
+    await state.clear()
+    
+    task_usd = DEFAULT_TASK_RATE / USD_TO_INR
+    sell_usd = GMAIL_SELL_RATE / USD_TO_INR
+    min_w_usd = MIN_WITHDRAWAL_AMT / USD_TO_INR
 
-@dp.message(AdminState.waiting_for_update_rewards, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def process_update_rewards_step(message: Message, state: FSMContext):
+    text = (
+        f"⚙️ <b>Change System Rates & Limits</b>\n\n"
+        f"📝 <b>Current Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} (${task_usd:.2f})\n"
+        f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
+        f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n\n"
+        f"Select an option below to update:"
+    )
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_change_values_inline_keyboard())
+
+@dp.callback_query(F.data == "admin_change_tasks_rate")
+async def cb_admin_change_tasks_rate(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_change_tasks_rate)
+    await call.message.answer(
+        f"💰 <b>Current Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f}\n\n"
+        f"Send the new rate for Tasks in INR (e.g. <code>40.0</code>):",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_change_tasks_rate, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_change_tasks_rate_step(message: Message, state: FSMContext):
+    global DEFAULT_TASK_RATE
     try:
-        new_reward = float(message.text.strip())
-        async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE tasks SET reward=$1 WHERE status='available'", new_reward)
+        new_rate = float(message.text.strip())
+        DEFAULT_TASK_RATE = new_rate
 
-        await message.answer(f"✅ **Updated reward to ₹{new_reward:.2f} for all available tasks!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        async with db_pool.acquire() as conn:
+            await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('default_task_rate', $1) ON CONFLICT (key) DO UPDATE SET value = $1", str(new_rate))
+            await conn.execute("UPDATE tasks SET reward=$1 WHERE status='available'", new_rate)
+
+        await message.answer(
+            f"✅ <b>Tasks Rate Updated Successfully!</b>\n\nNew Rate: ₹{new_rate:.2f}\n(All available tasks updated as well)",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_admin_menu_keyboard()
+        )
+    except ValueError:
+        await message.answer("❌ Invalid amount. Please send a valid number.", reply_markup=get_admin_menu_keyboard())
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_change_sell_rate")
+async def cb_admin_change_sell_rate(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_change_sell_rate)
+    await call.message.answer(
+        f"📨 <b>Current Gmail Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f}\n\n"
+        f"Send the new Sell Gmail rate in INR (e.g. <code>35.0</code>):",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_change_sell_rate, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_change_sell_rate_step(message: Message, state: FSMContext):
+    global GMAIL_SELL_RATE
+    try:
+        new_rate = float(message.text.strip())
+        GMAIL_SELL_RATE = new_rate
+
+        async with db_pool.acquire() as conn:
+            await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('gmail_sell_rate', $1) ON CONFLICT (key) DO UPDATE SET value = $1", str(new_rate))
+
+        await message.answer(
+            f"✅ <b>Gmail Sell Rate Updated Successfully!</b>\n\nNew Rate: ₹{new_rate:.2f}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_admin_menu_keyboard()
+        )
+    except ValueError:
+        await message.answer("❌ Invalid amount. Please send a valid number.", reply_markup=get_admin_menu_keyboard())
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_change_min_withdraw")
+async def cb_admin_change_min_withdraw(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_change_min_withdraw)
+    await call.message.answer(
+        f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f}\n\n"
+        f"Send the new Minimum Withdrawal limit in INR (e.g. <code>100.0</code>):",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_change_min_withdraw, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_change_min_withdraw_step(message: Message, state: FSMContext):
+    global MIN_WITHDRAWAL_AMT
+    try:
+        new_min = float(message.text.strip())
+        MIN_WITHDRAWAL_AMT = new_min
+
+        async with db_pool.acquire() as conn:
+            await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('min_withdrawal_rate', $1) ON CONFLICT (key) DO UPDATE SET value = $1", str(new_min))
+
+        await message.answer(
+            f"✅ <b>Minimum Withdrawal Updated Successfully!</b>\n\nNew Minimum Limit: ₹{new_min:.2f}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_admin_menu_keyboard()
+        )
     except ValueError:
         await message.answer("❌ Invalid amount. Please send a valid number.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
@@ -2727,9 +2865,8 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
         await call.answer("❌ Please link your UPI ID first before withdrawing via UPI!", show_alert=True)
         return
 
-    MIN_WITHDRAW = 150.0
-    if bal < MIN_WITHDRAW:
-        min_withdraw_str = format_currency(MIN_WITHDRAW, curr)
+    if bal < MIN_WITHDRAWAL_AMT:
+        min_withdraw_str = format_currency(MIN_WITHDRAWAL_AMT, curr)
         bal_str = format_currency(bal, curr)
         await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
         return
@@ -2793,9 +2930,8 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
         await call.answer("❌ Please link your USDT BEP-20 address first before withdrawing!", show_alert=True)
         return
 
-    MIN_WITHDRAW = 150.0
-    if bal < MIN_WITHDRAW:
-        min_withdraw_str = format_currency(MIN_WITHDRAW, curr)
+    if bal < MIN_WITHDRAWAL_AMT:
+        min_withdraw_str = format_currency(MIN_WITHDRAWAL_AMT, curr)
         bal_str = format_currency(bal, curr)
         await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
         return
