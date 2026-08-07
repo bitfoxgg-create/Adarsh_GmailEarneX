@@ -47,10 +47,11 @@ MUST_JOIN_CHANNEL = None
 BOT_USERNAME = "GmailEarnexBot"
 BOT_STATUS = True           # True = ON, False = OFF
 
-# GLOBAL DYNAMIC RATES (INR)
+# GLOBAL DYNAMIC RATES & DEFAULTS
 DEFAULT_TASK_RATE = 50.0
 GMAIL_SELL_RATE = 30.0
 MIN_WITHDRAWAL_AMT = 150.0
+DEFAULT_TASK_PASS = "TaskVerse@#"
 
 # VALIDATOR CONFIGURATION
 EMAILABLE_API_KEY = "05FXQPo7bT7K2ZtZ"
@@ -210,6 +211,7 @@ class AdminState(StatesGroup):
     waiting_for_change_tasks_rate = State()
     waiting_for_change_sell_rate = State()
     waiting_for_change_min_withdraw = State()
+    waiting_for_change_task_pass = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -318,7 +320,7 @@ async def init_db():
 
 async def load_settings_and_cache():
     global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
-    global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT
+    global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS
     
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id FROM banned_users")
@@ -356,6 +358,10 @@ async def load_settings_and_cache():
         min_w_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='min_withdrawal_rate'")
         if min_w_val:
             MIN_WITHDRAWAL_AMT = float(min_w_val)
+
+        task_pass_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='default_task_pass'")
+        if task_pass_val:
+            DEFAULT_TASK_PASS = task_pass_val
 
     try:
         me = await bot.get_me()
@@ -628,7 +634,13 @@ def get_change_values_inline_keyboard():
         icon_custom_emoji_id="5444856076954520455",
         style="primary"
     )
-    kb.adjust(1, 1, 1)
+    kb.button(
+        text="4. Change Task Password",
+        callback_data="admin_change_task_pass",
+        icon_custom_emoji_id="6005570495603282482",
+        style="primary"
+    )
+    kb.adjust(1, 1, 1, 1)
     return kb.as_markup()
 
 def get_validator_admin_inline_keyboard():
@@ -1909,7 +1921,7 @@ async def process_bulk_add_task_step(message: Message, state: FSMContext):
             )
             
             if not existing:
-                password = "TaskVerse@#"
+                password = DEFAULT_TASK_PASS
                 default_reward = DEFAULT_TASK_RATE
                 title = f"Login to {email}"
                 details = f"Email: {email} | Pass: {password}"
@@ -1980,7 +1992,7 @@ async def process_add_task_step(message: Message, state: FSMContext):
     await state.clear()
 
 async def insert_new_task(message: Message, username: str):
-    password = "TaskVerse@#"
+    password = DEFAULT_TASK_PASS
     default_reward = DEFAULT_TASK_RATE
     title = f"Login to {username}"
     details = f"Email: {username} | Pass: {password}"
@@ -2067,7 +2079,7 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
             password = parts[1].replace("Pass: ", "").strip()
         except Exception:
             email = title.replace("Login to ", "").strip()
-            password = "TaskVerse@#"
+            password = DEFAULT_TASK_PASS
         
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text='Approve', callback_data=f'ta:{task_id}', icon_custom_emoji_id="6217663806110175239", style="success"),
@@ -2655,7 +2667,8 @@ async def admin_btn_change_values(message: Message, state: FSMContext):
         f"⚙️ <b>Change System Rates & Limits</b>\n\n"
         f"📝 <b>Current Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} (${task_usd:.2f})\n"
         f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
-        f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n\n"
+        f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
+        f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n\n"
         f"Select an option below to update:"
     )
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_change_values_inline_keyboard())
@@ -2752,6 +2765,39 @@ async def process_change_min_withdraw_step(message: Message, state: FSMContext):
         )
     except ValueError:
         await message.answer("❌ Invalid amount. Please send a valid number.", reply_markup=get_admin_menu_keyboard())
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_change_task_pass")
+async def cb_admin_change_task_pass(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_change_task_pass)
+    await call.message.answer(
+        f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n\n"
+        f"Send the new default password for newly added tasks (e.g. <code>TaskVerseX</code>):",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_change_task_pass, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_change_task_pass_step(message: Message, state: FSMContext):
+    global DEFAULT_TASK_PASS
+    new_pass = message.text.strip()
+    if not new_pass:
+        await message.answer("❌ Password cannot be empty.", reply_markup=get_admin_menu_keyboard())
+        await state.clear()
+        return
+
+    DEFAULT_TASK_PASS = new_pass
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('default_task_pass', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_pass)
+
+    await message.answer(
+        f"✅ <b>Default Task Password Updated Successfully!</b>\n\nNew Password: <code>{new_pass}</code>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_admin_menu_keyboard()
+    )
     await state.clear()
 
 @dp.message(F.text == "🗑 Remove Task", StateFilter("*"))
@@ -3053,7 +3099,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
         password = parts[1].replace("Pass: ", "").strip()
     except Exception:
         email = title.replace("Login to ", "").strip()
-        password = "TaskVerse@#"
+        password = DEFAULT_TASK_PASS
 
     # Real-Time Verification with MyEmailVerifier/Emailable
     is_valid = await is_gmail_registered(email, user_id=user_id)
