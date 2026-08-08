@@ -391,7 +391,6 @@ async def ensure_user(user_id: int, referrer_id: int = None, conn=None) -> bool:
         if result == "INSERT 0 1":
             is_new = True
 
-        # STRICT FAIR REFERRAL CHECK: Prevent self-referrals and verify referrer existence
         if referrer_id and referrer_id != user_id:
             ref_exists = await c.fetchval("SELECT user_id FROM users WHERE user_id=$1", referrer_id)
             if ref_exists:
@@ -963,9 +962,8 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
         ) or 0
         
         approved_ref_accounts = await conn.fetchval('''
-            SELECT COUNT(*) FROM transactions t
-            JOIN users u ON t.user_id = u.user_id
-            WHERE u.referred_by = $1 AND t.type = 'referral'
+            SELECT COUNT(*) FROM transactions 
+            WHERE user_id = $1 AND type = 'referral'
         ''', user_id) or 0
 
         total_earnings = user_data['referral_earnings'] if user_data else 0.0
