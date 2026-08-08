@@ -52,6 +52,8 @@ DEFAULT_TASK_RATE = 50.0
 GMAIL_SELL_RATE = 30.0
 MIN_WITHDRAWAL_AMT = 150.0
 DEFAULT_TASK_PASS = "TaskVerse@#"
+REFERRAL_SELL_BONUS = 5.0
+REFERRAL_TASK_BONUS = 7.0
 
 # VALIDATOR CONFIGURATION
 EMAILABLE_API_KEY = "05FXQPo7bT7K2ZtZ"
@@ -389,6 +391,7 @@ async def ensure_user(user_id: int, referrer_id: int = None, conn=None) -> bool:
         if result == "INSERT 0 1":
             is_new = True
 
+        # STRICT FAIR REFERRAL CHECK: Prevent self-referrals and verify referrer existence
         if referrer_id and referrer_id != user_id:
             ref_exists = await c.fetchval("SELECT user_id FROM users WHERE user_id=$1", referrer_id)
             if ref_exists:
@@ -962,7 +965,7 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
         approved_ref_accounts = await conn.fetchval('''
             SELECT COUNT(*) FROM transactions t
             JOIN users u ON t.user_id = u.user_id
-            WHERE u.referred_by = $1 AND t.type IN ('sell', 'task')
+            WHERE u.referred_by = $1 AND t.type = 'referral'
         ''', user_id) or 0
 
         total_earnings = user_data['referral_earnings'] if user_data else 0.0
@@ -970,8 +973,8 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
     formatted_earnings = format_currency(total_earnings, curr)
     invite_link = f"https://t.me/{BOT_USERNAME}?start={user_id}"
 
-    rate_sell = format_currency(5.0, curr)
-    rate_task = format_currency(7.0, curr)
+    rate_sell = format_currency(REFERRAL_SELL_BONUS, curr)
+    rate_task = format_currency(REFERRAL_TASK_BONUS, curr)
 
     text = (
         f'<tg-emoji emoji-id="6183862417785626642">👥</tg-emoji> <b>My Referrals</b>\n'
@@ -3168,9 +3171,9 @@ async def approve_sell_unified(call: CallbackQuery):
 
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
 
-        if referred_by:
+        if referred_by and referred_by != user_id:
             await ensure_user(referred_by, conn=conn)
-            ref_reward = 5.0
+            ref_reward = REFERRAL_SELL_BONUS
             async with conn.transaction():
                 await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
                 await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
@@ -3283,9 +3286,9 @@ async def approve_task(call: CallbackQuery):
 
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
 
-        if referred_by:
+        if referred_by and referred_by != user_id:
             await ensure_user(referred_by, conn=conn)
-            ref_reward = 7.0
+            ref_reward = REFERRAL_TASK_BONUS
             async with conn.transaction():
                 await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
                 await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
