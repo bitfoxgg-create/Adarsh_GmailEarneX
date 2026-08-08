@@ -55,6 +55,15 @@ DEFAULT_TASK_PASS = "TaskVerse@#"
 REFERRAL_SELL_BONUS = 5.0
 REFERRAL_TASK_BONUS = 7.0
 
+# DYNAMIC FEES CONFIGURATION (INR)
+UPI_FEES = 3.0
+USDT_FEES = 3.0
+ULTRA_FEES = 0.0
+
+# ULTRA GATEWAY CONFIGURATION
+ULTRA_TOKEN = "niJeDFHRIN9ONCwxGparqUp0degHIpjHu0w3pprXok"
+ULTRA_KEY = "DL6mlu7DBRSR8odXWGG5"
+
 # VALIDATOR CONFIGURATION
 EMAILABLE_API_KEY = "05FXQPo7bT7K2ZtZ"
 VALIDATOR_ENABLED = True     # True = Active, False = Deactivated
@@ -186,6 +195,7 @@ class UserState(StatesGroup):
     selling_password = State()
     setting_upi = State()
     setting_usdt = State()
+    setting_ultra = State()
     submitting_task = State()
     waiting_for_support = State()
 
@@ -214,6 +224,8 @@ class AdminState(StatesGroup):
     waiting_for_change_sell_rate = State()
     waiting_for_change_min_withdraw = State()
     waiting_for_change_task_pass = State()
+    waiting_for_change_fees = State()
+    waiting_for_change_ultra_token = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -245,6 +257,7 @@ async def init_db():
                 balance DOUBLE PRECISION DEFAULT 0,
                 upi TEXT DEFAULT 'None',
                 usdt_address TEXT DEFAULT 'None',
+                ultra_number TEXT DEFAULT 'None',
                 notifications_enabled BOOLEAN DEFAULT TRUE,
                 currency TEXT DEFAULT 'USD',
                 referred_by BIGINT DEFAULT NULL,
@@ -253,6 +266,7 @@ async def init_db():
         ''')
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS upi TEXT DEFAULT 'None'")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS usdt_address TEXT DEFAULT 'None'")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS ultra_number TEXT DEFAULT 'None'")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN DEFAULT TRUE")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'USD'")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT DEFAULT NULL")
@@ -322,7 +336,7 @@ async def init_db():
 
 async def load_settings_and_cache():
     global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
-    global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS
+    global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS, UPI_FEES, USDT_FEES, ULTRA_FEES, ULTRA_TOKEN, ULTRA_KEY
     
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id FROM banned_users")
@@ -365,6 +379,26 @@ async def load_settings_and_cache():
         if task_pass_val:
             DEFAULT_TASK_PASS = task_pass_val
 
+        upi_f = await conn.fetchval("SELECT value FROM bot_settings WHERE key='upi_fees'")
+        if upi_f:
+            UPI_FEES = float(upi_f)
+
+        usdt_f = await conn.fetchval("SELECT value FROM bot_settings WHERE key='usdt_fees'")
+        if usdt_f:
+            USDT_FEES = float(usdt_f)
+
+        ultra_f = await conn.fetchval("SELECT value FROM bot_settings WHERE key='ultra_fees'")
+        if ultra_f:
+            ULTRA_FEES = float(ultra_f)
+
+        u_tok = await conn.fetchval("SELECT value FROM bot_settings WHERE key='ultra_token'")
+        if u_tok:
+            ULTRA_TOKEN = u_tok
+
+        u_key = await conn.fetchval("SELECT value FROM bot_settings WHERE key='ultra_key'")
+        if u_key:
+            ULTRA_KEY = u_key
+
     try:
         me = await bot.get_me()
         if me.username:
@@ -385,7 +419,7 @@ async def ensure_user(user_id: int, referrer_id: int = None, conn=None) -> bool:
     async def _run_ensure(c):
         nonlocal is_new
         result = await c.execute(
-            "INSERT INTO users (user_id, balance, upi, usdt_address, notifications_enabled, currency) VALUES ($1, 0, 'None', 'None', TRUE, 'USD') ON CONFLICT (user_id) DO NOTHING", 
+            "INSERT INTO users (user_id, balance, upi, usdt_address, ultra_number, notifications_enabled, currency) VALUES ($1, 0, 'None', 'None', 'None', TRUE, 'USD') ON CONFLICT (user_id) DO NOTHING", 
             user_id
         )
         if result == "INSERT 0 1":
@@ -413,7 +447,7 @@ async def get_user_data(user_id: int):
         
     await ensure_user(user_id)
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT balance, upi, usdt_address, notifications_enabled, currency, referred_by, referral_earnings FROM users WHERE user_id=$1", user_id)
+        row = await conn.fetchrow("SELECT balance, upi, usdt_address, ultra_number, notifications_enabled, currency, referred_by, referral_earnings FROM users WHERE user_id=$1", user_id)
         if row:
             USER_CACHE[user_id] = dict(row)
         return row
@@ -642,7 +676,19 @@ def get_change_values_inline_keyboard():
         icon_custom_emoji_id="6005570495603282482",
         style="primary"
     )
-    kb.adjust(1, 1, 1, 1)
+    kb.button(
+        text="5. Change Fees",
+        callback_data="admin_change_fees",
+        icon_custom_emoji_id="5417924076503062111",
+        style="primary"
+    )
+    kb.button(
+        text="6. Change Ultra",
+        callback_data="admin_change_ultra",
+        icon_custom_emoji_id="6005570495603282482",
+        style="primary"
+    )
+    kb.adjust(1, 1, 1, 1, 1, 1)
     return kb.as_markup()
 
 def get_validator_admin_inline_keyboard():
@@ -688,16 +734,19 @@ def get_unassign_inline_keyboard():
     kb.adjust(2)
     return kb.as_markup()
 
-def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
+def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool, ultra_set: bool = False):
     kb = InlineKeyboardBuilder()
     upi_link_text = "Change UPI" if upi_set else "Link UPI"
-    usdt_link_text = "Change USDT BEP-20" if usdt_set else "Link USDT BEP-20"
+    usdt_link_text = "Change USDT" if usdt_set else "Link USDT BEP-20"
+    ultra_link_text = "Change Ultra" if ultra_set else "Link Ultra Gateway"
     
     upi_emoji = "6278557702109013266" if upi_set else "5902449142575141204"
     usdt_emoji = "5197434882321567830" if usdt_set else "5902449142575141204"
+    ultra_emoji = "5195033767969839232" if ultra_set else "5902449142575141204"
 
     kb.button(text=upi_link_text, callback_data="link_upi", icon_custom_emoji_id=upi_emoji, style="primary")
     kb.button(text=usdt_link_text, callback_data="link_usdt", icon_custom_emoji_id=usdt_emoji, style="primary")
+    kb.button(text=ultra_link_text, callback_data="link_ultra", icon_custom_emoji_id=ultra_emoji, style="primary")
     kb.button(
         text="Withdraw", 
         callback_data="choose_withdraw_method", 
@@ -709,19 +758,20 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool):
         callback_data="menu_back",
         icon_custom_emoji_id="5352759161945867747"
     )
-    kb.adjust(2, 1, 1)
+    kb.adjust(2, 1, 1, 1)
     return kb.as_markup()
 
 def get_withdraw_options_keyboard():
     kb = InlineKeyboardBuilder()
-    kb.button(text="Withdraw via UPI", callback_data="withdraw_upi", icon_custom_emoji_id="6278557702109013266", style="success")
-    kb.button(text="Withdraw via USDT BEP-20", callback_data="withdraw_usdt", icon_custom_emoji_id="5197434882321567830", style="success")
+    kb.button(text=f"Withdraw via UPI (Fee: ₹{UPI_FEES:.2f})", callback_data="withdraw_upi", icon_custom_emoji_id="6278557702109013266", style="success")
+    kb.button(text=f"Withdraw via USDT BEP-20 (Fee: ₹{USDT_FEES:.2f})", callback_data="withdraw_usdt", icon_custom_emoji_id="5197434882321567830", style="success")
+    kb.button(text=f"Withdraw via Ultra Gateway (0 Fees)", callback_data="withdraw_ultra", icon_custom_emoji_id="5195033767969839232", style="success")
     kb.button(
         text="Back",
         callback_data="menu_balance",
         icon_custom_emoji_id="5352759161945867747"
     )
-    kb.adjust(1, 1, 1)
+    kb.adjust(1, 1, 1, 1)
     return kb.as_markup()
 
 def get_back_inline_keyboard():
@@ -1347,23 +1397,26 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
     bal = user_data['balance'] if user_data else 0.0
     upi = user_data['upi'] if user_data and user_data['upi'] else "None"
     usdt = user_data['usdt_address'] if user_data and user_data['usdt_address'] else "None"
+    ultra = user_data['ultra_number'] if user_data and user_data['ultra_number'] else "None"
     curr = user_data['currency'] if user_data else "USD"
     
     upi_set = upi != "None" and upi != ""
     usdt_set = usdt != "None" and usdt != ""
+    ultra_set = ultra != "None" and ultra != ""
     formatted_bal = format_currency(bal, curr)
     
     text = (
         f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance</b>\n\n'
         f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Available:</b> {formatted_bal}\n'
         f'<tg-emoji emoji-id="6278557702109013266">🏦</tg-emoji> <b>UPI:</b> <code>{upi}</code>\n'
-        f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> <b>USDT BEP-20:</b> <code>{usdt}</code>'
+        f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> <b>USDT BEP-20:</b> <code>{usdt}</code>\n'
+        f'<tg-emoji emoji-id="5195033767969839232">⚡️</tg-emoji> <b>Ultra Gateway:</b> <code>{ultra}</code>'
     )
     
     try:
-        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set))
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set, ultra_set))
     except Exception:
-        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set))
+        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set, ultra_set))
     await state.update_data(last_menu_msg_id=call.message.message_id)
 
 @dp.callback_query(F.data == "menu_sell_gmail")
@@ -1660,6 +1713,23 @@ async def process_setting_usdt(message: Message, state: FSMContext):
     invalidate_user_cache(user_id)
     await message.answer(
         f"✅ <b>USDT BEP-20 Address Updated Successfully!</b>\n\n<code>{usdt_input}</code>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_main_menu_keyboard()
+    )
+    await state.clear()
+
+@dp.message(UserState.setting_ultra, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_setting_ultra(message: Message, state: FSMContext):
+    ultra_input = message.text.strip()
+    user_id = message.from_user.id
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET ultra_number=$1 WHERE user_id=$2", ultra_input, user_id)
+
+    invalidate_user_cache(user_id)
+    await message.answer(
+        f"✅ <b>Ultra Gateway Number Updated Successfully!</b>\n\n<code>{ultra_input}</code>\n"
+        f"🌐 <b>Ultra Gateway:</b> https://ultra-pay.store",
         parse_mode=ParseMode.HTML,
         reply_markup=get_main_menu_keyboard()
     )
@@ -2669,7 +2739,9 @@ async def admin_btn_change_values(message: Message, state: FSMContext):
         f"📝 <b>Current Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} (${task_usd:.2f})\n"
         f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
         f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
-        f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n\n"
+        f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
+        f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
+        f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n\n"
         f"Select an option below to update:"
     )
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_change_values_inline_keyboard())
@@ -2801,6 +2873,102 @@ async def process_change_task_pass_step(message: Message, state: FSMContext):
     )
     await state.clear()
 
+@dp.callback_query(F.data == "admin_change_fees")
+async def cb_admin_change_fees(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_change_fees)
+    await call.message.answer(
+        f"🏷 <b>Current Fees Settings:</b>\n"
+        f"• UPI: ₹{UPI_FEES:.2f}\n"
+        f"• USDT: ₹{USDT_FEES:.2f}\n"
+        f"• Ultra: ₹{ULTRA_FEES:.2f}\n\n"
+        f"Please send the new fees line by line below:\n"
+        f"<i>Example:</i>\n"
+        f"<code>upi 5</code>\n"
+        f"<code>usdt 5</code>\n"
+        f"<code>ultra 0</code>",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_change_fees, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_change_fees_step(message: Message, state: FSMContext):
+    global UPI_FEES, USDT_FEES, ULTRA_FEES
+    lines = message.text.strip().split('\n')
+    
+    updated = []
+    async with db_pool.acquire() as conn:
+        for line in lines:
+            parts = line.strip().split()
+            if len(parts) == 2:
+                method = parts[0].lower()
+                try:
+                    fee_val = float(parts[1])
+                    if method == 'upi':
+                        UPI_FEES = fee_val
+                        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('upi_fees', $1) ON CONFLICT (key) DO UPDATE SET value = $1", str(fee_val))
+                        updated.append(f"UPI Fee: ₹{fee_val:.2f}")
+                    elif method == 'usdt':
+                        USDT_FEES = fee_val
+                        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('usdt_fees', $1) ON CONFLICT (key) DO UPDATE SET value = $1", str(fee_val))
+                        updated.append(f"USDT Fee: ₹{fee_val:.2f}")
+                    elif method in ['ultra', 'ultragateway']:
+                        ULTRA_FEES = fee_val
+                        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('ultra_fees', $1) ON CONFLICT (key) DO UPDATE SET value = $1", str(fee_val))
+                        updated.append(f"Ultra Fee: ₹{fee_val:.2f}")
+                except ValueError:
+                    pass
+
+    if not updated:
+        await message.answer("❌ Invalid format. Please provide values line by line like: `upi 5`", reply_markup=get_admin_menu_keyboard())
+    else:
+        await message.answer(
+            f"✅ <b>Fees Updated Successfully!</b>\n\n" + "\n".join(updated),
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_admin_menu_keyboard()
+        )
+    await state.clear()
+
+@dp.callback_query(F.data == "admin_change_ultra")
+async def cb_admin_change_ultra(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_change_ultra_token)
+    await call.message.answer(
+        f"⚡️ <b>Current Ultra Gateway Settings:</b>\n\n"
+        f"🔑 <b>API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
+        f"🔐 <b>API Key:</b> <code>{ULTRA_KEY}</code>\n\n"
+        f"Send the new API Token (or token and key separated by space):",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_change_ultra_token, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_change_ultra_token_step(message: Message, state: FSMContext):
+    global ULTRA_TOKEN, ULTRA_KEY
+    parts = message.text.strip().split()
+    
+    new_token = parts[0]
+    ULTRA_TOKEN = new_token
+    
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('ultra_token', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_token)
+        
+        if len(parts) > 1:
+            new_key = parts[1]
+            ULTRA_KEY = new_key
+            await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('ultra_key', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_key)
+
+    await message.answer(
+        f"✅ <b>Ultra Gateway API Configuration Updated!</b>\n\n"
+        f"🔑 <b>Token:</b> <code>{ULTRA_TOKEN}</code>\n"
+        f"🔐 <b>Key:</b> <code>{ULTRA_KEY}</code>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_admin_menu_keyboard()
+    )
+    await state.clear()
+
 @dp.message(F.text == "🗑 Remove Task", StateFilter("*"))
 async def admin_btn_remove_task(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -2881,6 +3049,16 @@ async def start_link_usdt(call: CallbackQuery, state: FSMContext):
     await state.set_state(UserState.setting_usdt)
     await call.message.answer('<tg-emoji emoji-id="5902449142575141204">🪙</tg-emoji> Send your <b>USDT BEP-20</b> address below:\n\n<i>Example: 0x1234567890abcdef1234567890abcdef12345678</i>', parse_mode=ParseMode.HTML)
 
+@dp.callback_query(F.data == "link_ultra")
+async def start_link_ultra(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    await state.set_state(UserState.setting_ultra)
+    await call.message.answer(
+        '⚡️ Send your <b>Ultra Gateway Number</b> below:\n\n'
+        '🌐 <i>Register/Get your Ultra Gateway account here:</i> https://ultra-pay.store', 
+        parse_mode=ParseMode.HTML
+    )
+
 @dp.callback_query(F.data == "choose_withdraw_method")
 async def choose_withdraw_method_handler(call: CallbackQuery):
     user_id = call.from_user.id
@@ -2912,13 +3090,17 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
         await call.answer("❌ Please link your UPI ID first before withdrawing via UPI!", show_alert=True)
         return
 
-    if bal < MIN_WITHDRAWAL_AMT:
+    required_amount = MIN_WITHDRAWAL_AMT + UPI_FEES
+    if bal < required_amount:
         min_withdraw_str = format_currency(MIN_WITHDRAWAL_AMT, curr)
+        fee_str = format_currency(UPI_FEES, curr)
         bal_str = format_currency(bal, curr)
-        await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
+        await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str} + {fee_str} Fee. Current Balance: {bal_str}", show_alert=True)
         return
 
     await call.answer()
+
+    payout_amount = bal - UPI_FEES
 
     async with db_pool.acquire() as conn:
         existing_pending = await conn.fetchrow(
@@ -2931,7 +3113,7 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
 
         withdraw_id = await conn.fetchval(
             "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, 'UPI', $3) RETURNING id",
-            user_id, bal, upi
+            user_id, payout_amount, upi
         )
 
     kb = InlineKeyboardBuilder()
@@ -2953,15 +3135,20 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id} (UPI)</b>\n\n'
         f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
         f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{user_id}</code>\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f}\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{payout_amount:.2f} (Deducted Fee: ₹{UPI_FEES:.2f})\n'
         f'<tg-emoji emoji-id="6152069549442208798">🏦</tg-emoji> UPI: <code>{upi}</code>',
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
 
-    bal_display = format_currency(bal, curr)
+    bal_display = format_currency(payout_amount, curr)
+    fee_display = format_currency(UPI_FEES, curr)
     try:
-        await call.message.edit_text(f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of {bal_display} sent to admin using UPI: <code>{upi}</code>', parse_mode=ParseMode.HTML)
+        await call.message.edit_text(
+            f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of {bal_display} sent to admin using UPI: <code>{upi}</code>\n'
+            f'🏷 <b>Deducted Fee:</b> {fee_display}',
+            parse_mode=ParseMode.HTML
+        )
     except Exception as e:
         print(f"Error editing withdraw msg: {e}")
 
@@ -2977,13 +3164,17 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
         await call.answer("❌ Please link your USDT BEP-20 address first before withdrawing!", show_alert=True)
         return
 
-    if bal < MIN_WITHDRAWAL_AMT:
+    required_amount = MIN_WITHDRAWAL_AMT + USDT_FEES
+    if bal < required_amount:
         min_withdraw_str = format_currency(MIN_WITHDRAWAL_AMT, curr)
+        fee_str = format_currency(USDT_FEES, curr)
         bal_str = format_currency(bal, curr)
-        await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
+        await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str} + {fee_str} Fee. Current Balance: {bal_str}", show_alert=True)
         return
 
     await call.answer()
+
+    payout_amount = bal - USDT_FEES
 
     async with db_pool.acquire() as conn:
         existing_pending = await conn.fetchrow(
@@ -2996,7 +3187,7 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
 
         withdraw_id = await conn.fetchval(
             "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, 'USDT BEP-20', $3) RETURNING id",
-            user_id, bal, usdt
+            user_id, payout_amount, usdt
         )
 
     kb = InlineKeyboardBuilder()
@@ -3013,23 +3204,111 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
         style="danger"
     )
     
-    usdt_amount = bal / USD_TO_INR
+    usdt_amount = payout_amount / USD_TO_INR
     await bot.send_message(
         ADMIN_ID,
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id} (USDT BEP-20)</b>\n\n'
         f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
         f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{user_id}</code>\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{bal:.2f} (~${usdt_amount:.2f} USDT)\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{payout_amount:.2f} (~${usdt_amount:.2f} USDT) (Fee: ₹{USDT_FEES:.2f})\n'
         f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> USDT BEP-20: <code>{usdt}</code>',
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
 
-    bal_display = format_currency(bal, curr)
+    bal_display = format_currency(payout_amount, curr)
+    fee_display = format_currency(USDT_FEES, curr)
     try:
-        await call.message.edit_text(f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of {bal_display} (~${usdt_amount:.2f} USDT) sent to admin using USDT address: <code>{usdt}</code>', parse_mode=ParseMode.HTML)
+        await call.message.edit_text(
+            f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of {bal_display} (~${usdt_amount:.2f} USDT) sent to admin using USDT address: <code>{usdt}</code>\n'
+            f'🏷 <b>Deducted Fee:</b> {fee_display}',
+            parse_mode=ParseMode.HTML
+        )
     except Exception as e:
         print(f"Error editing withdraw msg: {e}")
+
+@dp.callback_query(F.data == "withdraw_ultra")
+async def inline_withdraw_ultra_handler(call: CallbackQuery):
+    user_id = call.from_user.id
+    user_data = await get_user_data(user_id)
+    bal = user_data['balance'] if user_data else 0.0
+    ultra_num = user_data['ultra_number'] if user_data else "None"
+    curr = user_data['currency'] if user_data else "USD"
+
+    if ultra_num == "None" or not ultra_num:
+        await call.answer("❌ Please link your Ultra Gateway number first before withdrawing!", show_alert=True)
+        return
+
+    required_amount = MIN_WITHDRAWAL_AMT + ULTRA_FEES
+    if bal < required_amount:
+        min_withdraw_str = format_currency(MIN_WITHDRAWAL_AMT, curr)
+        fee_str = format_currency(ULTRA_FEES, curr)
+        bal_str = format_currency(bal, curr)
+        await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str} + {fee_str} Fee. Current Balance: {bal_str}", show_alert=True)
+        return
+
+    payout_amount = bal - ULTRA_FEES
+
+    # Instant API payout execution via Ultra Gateway
+    url = f"https://ultra-pay.store/APIs/api?token={urllib.parse.quote(ULTRA_TOKEN)}&key={urllib.parse.quote(ULTRA_KEY)}&paytoNumber={urllib.parse.quote(ultra_num)}&amount={payout_amount:.2f}&comment=iGmail Pay"
+
+    await call.answer("⚡ Processing instant payment via Ultra Gateway...", show_alert=False)
+
+    api_success = False
+    api_reason = "Unknown Error"
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15.0)) as resp:
+                raw_text = await resp.text()
+                try:
+                    res_data = json.loads(raw_text)
+                except Exception:
+                    res_data = {}
+
+                if resp.status == 200:
+                    status_val = str(res_data.get("status", "")).lower()
+                    if status_val in ["success", "true", "1", "ok"]:
+                        api_success = True
+                    else:
+                        api_reason = res_data.get("message") or res_data.get("msg") or raw_text
+                else:
+                    api_reason = f"HTTP Error {resp.status}: {raw_text}"
+    except Exception as e:
+        api_reason = f"Connection error: {e}"
+
+    if api_success:
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id=$2", bal, user_id)
+                await conn.execute("INSERT INTO withdrawals(user_id, amount, method, payment_address, status) VALUES ($1, $2, 'Ultra Gateway', $3, 'paid')", user_id, payout_amount, ultra_num)
+                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "withdrawal", -bal, "Ultra Gateway instant payout paid")
+
+        invalidate_user_cache(user_id)
+
+        bal_display = format_currency(payout_amount, curr)
+        msg_text = (
+            f"🎉 <b>Instant Payment Successful!</b>\n\n"
+            f"⚡️ <b>Method:</b> Ultra Gateway\n"
+            f"📱 <b>Number:</b> <code>{ultra_num}</code>\n"
+            f"💰 <b>Amount Transferred:</b> {bal_display}\n\n"
+            f"🌐 <i>Gateway:</i> https://ultra-pay.store"
+        )
+        try:
+            await call.message.edit_text(msg_text, parse_mode=ParseMode.HTML)
+        except Exception:
+            await call.message.answer(msg_text, parse_mode=ParseMode.HTML)
+    else:
+        fail_msg = (
+            f"❌ <b>Ultra Gateway Instant Payment Failed!</b>\n\n"
+            f"💬 <b>Reason:</b> <code>{api_reason}</code>\n\n"
+            f"<i>Your balance was not deducted. Please check your Ultra Gateway number or try again later.</i>\n"
+            f"🌐 <i>Gateway link:</i> https://ultra-pay.store"
+        )
+        try:
+            await call.message.edit_text(fail_msg, parse_mode=ParseMode.HTML)
+        except Exception:
+            await call.message.answer(fail_msg, parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "user_submit_task")
 async def inline_submit_task(call: CallbackQuery, state: FSMContext):
