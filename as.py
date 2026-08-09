@@ -826,6 +826,83 @@ async def edit_admin_message(call: CallbackQuery, additional_text: str):
         print(f"Error editing admin message: {e}")
 
 # ============================================
+# PAGINATED TRANSACTION HISTORY RENDERER
+# ============================================
+
+async def render_transaction_history_page(target_user_id: int, page: int = 1, is_admin: bool = False):
+    items_per_page = 10
+
+    user_data = await get_user_data(target_user_id)
+    curr = user_data['currency'] if user_data else "USD"
+
+    async with db_pool.acquire() as conn:
+        tx_rows = await conn.fetch('''
+            SELECT type, amount, note, created_at 
+            FROM transactions 
+            WHERE user_id=$1 
+            ORDER BY id DESC
+        ''', target_user_id)
+
+    total_items = len(tx_rows)
+    total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
+
+    if page < 1:
+        page = 1
+    elif page > total_pages:
+        page = total_pages
+
+    start_idx = (page - 1) * items_per_page
+    end_idx = min(start_idx + items_per_page, total_items)
+
+    page_items = tx_rows[start_idx:end_idx]
+
+    header_title = f"💳 <b>Transaction History (User <code>{target_user_id}</code>)</b>" if is_admin else '<tg-emoji emoji-id="5440410042773824003">📜</tg-emoji> <b>Transaction History</b>'
+
+    if total_items == 0:
+        text = f"{header_title}\n\n📭 No transaction records found."
+    else:
+        text = (
+            f"{header_title}\n"
+            f"Showing <b>{start_idx + 1}-{end_idx}</b> of <b>{total_items}</b> transaction(s).\n\n"
+        )
+
+        for tx in page_items:
+            amt = tx['amount']
+            sign = "+" if amt >= 0 else "-"
+            formatted_amt = format_currency(abs(amt), curr)
+            tx_type = (tx['type'] or 'general').upper()
+            date_fmt = tx['created_at'].strftime("%b %d, %Y %I:%M %p")
+            note_str = f"\n📝 <i>{tx['note']}</i>" if tx['note'] else ""
+
+            type_emoji = "🟢" if amt >= 0 else "🔴"
+            text += (
+                f"{type_emoji} <b>{sign}{formatted_amt}</b> | <code>{tx_type}</code>\n"
+                f"📅 {date_fmt}{note_str}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+            )
+
+    kb = InlineKeyboardBuilder()
+
+    prefix = f"adm_tx_page:{target_user_id}" if is_admin else "user_tx_page"
+
+    if total_pages > 1:
+        nav_buttons = []
+        if page > 1:
+            nav_buttons.append(InlineKeyboardButton(text="<- Prev", callback_data=f"{prefix}:{page - 1}"))
+        
+        nav_buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+        
+        if page < total_pages:
+            nav_buttons.append(InlineKeyboardButton(text="Next ->", callback_data=f"{prefix}:{page + 1}"))
+        
+        kb.row(*nav_buttons)
+
+    if not is_admin:
+        kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back", icon_custom_emoji_id="5352759161945867747"))
+
+    return text, kb.as_markup()
+
+# ============================================
 # GLOBAL BAN, BOT STATUS & MUST-JOIN MIDDLEWARES
 # ============================================
 
@@ -1543,29 +1620,26 @@ async def cb_history(event: CallbackQuery | Message, state: FSMContext):
 
     await state.clear()
     user_id = event.from_user.id
-    user_data = await get_user_data(user_id)
-    curr = user_data['currency'] if user_data else "USD"
-    
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT type, amount, note, created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 10", user_id)
-
-    if not rows:
-        text = "📭 No transactions found."
-    else:
-        text = '<tg-emoji emoji-id="5440410042773824003">📜</tg-emoji> <b>Last Transactions</b>\n\n'
-        for r in rows:
-            sign = "+" if r['amount'] >= 0 else ""
-            formatted_amt = format_currency(abs(r['amount']), curr)
-            text += f"• {sign}{formatted_amt} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    text, reply_markup = await render_transaction_history_page(user_id, page=1, is_admin=False)
 
     if isinstance(event, CallbackQuery):
         try:
-            await event.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+            await event.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
         except Exception:
-            await event.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+            await event.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
     else:
-        sent_msg = await event.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+        sent_msg = await event.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
         await state.update_data(last_menu_msg_id=sent_msg.message_id)
+
+@dp.callback_query(F.data.startswith("user_tx_page:"))
+async def cb_user_tx_page(call: CallbackQuery):
+    await call.answer()
+    page = int(call.data.split(":")[1])
+    text, reply_markup = await render_transaction_history_page(call.from_user.id, page=page, is_admin=False)
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+    except Exception:
+        pass
 
 @dp.callback_query(F.data == "menu_support")
 async def cb_support_start(call: CallbackQuery, state: FSMContext):
@@ -2675,20 +2749,23 @@ async def admin_btn_transactions(message: Message, state: FSMContext):
 async def process_user_transactions_step(message: Message, state: FSMContext):
     try:
         target_id = int(message.text.strip())
-        async with db_pool.acquire() as conn:
-            rows = await conn.fetch("SELECT type, amount, note, created_at FROM transactions WHERE user_id=$1 ORDER BY id DESC LIMIT 10", target_id)
-
-        if not rows:
-            await message.answer(f"📭 No transactions found for User `{target_id}`.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
-        else:
-            text = f"💳 **Last 10 Transactions for User `{target_id}`:**\n\n"
-            for r in rows:
-                sign = "+" if r['amount'] >= 0 else ""
-                text += f"• {sign}₹{abs(r['amount']):.2f} | {r['type']}\n{r['note']}\n{r['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-            await message.answer(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        text, reply_markup = await render_transaction_history_page(target_id, page=1, is_admin=True)
+        await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
     except ValueError:
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
+
+@dp.callback_query(F.data.startswith("adm_tx_page:"))
+async def cb_admin_tx_page(call: CallbackQuery):
+    await call.answer()
+    parts = call.data.split(":")
+    target_user_id = int(parts[1])
+    page = int(parts[2])
+    text, reply_markup = await render_transaction_history_page(target_user_id, page=page, is_admin=True)
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+    except Exception:
+        pass
 
 @dp.message(F.text == "📊 View Stats", StateFilter("*"))
 async def admin_btn_view_stats(message: Message, state: FSMContext):
