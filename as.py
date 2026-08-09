@@ -76,7 +76,7 @@ USER_CACHE = {}       # {user_id: dict_data}
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "👥 Referrals", "📁 My Accounts", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
-    "➕ Add Task", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
+    "➕ Add Task", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🚫 Cancel Sell", "🚫 Cancel Task", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "⚙️ Change Values", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "⚙️ Validator", "👑 Transfer Admin"
@@ -226,6 +226,8 @@ class AdminState(StatesGroup):
     waiting_for_change_task_pass = State()
     waiting_for_change_fees = State()
     waiting_for_change_ultra_token = State()
+    waiting_for_bulk_cancel_sell_reason = State()
+    waiting_for_bulk_cancel_task_reason = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -626,6 +628,8 @@ def get_admin_menu_keyboard():
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💸 Pending Withdrawals", style="primary")
     kb.button(text="💬 Chat", style="primary")
+    kb.button(text="🚫 Cancel Sell", style="danger")
+    kb.button(text="🚫 Cancel Task", style="danger")
     kb.button(text="🗑 Unassign Tasks", style="danger")
     kb.button(text="🔍 Find ID", style="primary")
     kb.button(text="➕ Add Balance", style="success")
@@ -2294,6 +2298,111 @@ async def process_chat_message_step(message: Message, state: FSMContext):
         await message.answer(f"✅ **Message successfully sent to User `{target_user_id}`!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
     except Exception as e:
         await message.answer(f"❌ Failed to send message to User `{target_user_id}`.\n\nError: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+
+    await state.clear()
+
+@dp.message(F.text == "🚫 Cancel Sell", StateFilter("*"))
+async def admin_btn_cancel_sell(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    
+    async with db_pool.acquire() as conn:
+        count = await conn.fetchval("SELECT COUNT(*) FROM pending_sells WHERE status = 'pending_review'")
+        
+    if not count:
+        await message.answer("📭 <b>No pending Gmail sell requests found to cancel.</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+        return
+
+    await state.set_state(AdminState.waiting_for_bulk_cancel_sell_reason)
+    await message.answer(
+        f"🚫 <b>Cancel All Pending Sell Gmail ({count} pending)</b>\n\n"
+        f"Send the single rejection reason message to send to all affected users below:",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_bulk_cancel_sell_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_bulk_cancel_sell_reason_step(message: Message, state: FSMContext):
+    reason = message.text.strip()
+    
+    async with db_pool.acquire() as conn:
+        pending_sells = await conn.fetch("SELECT id, user_id FROM pending_sells WHERE status = 'pending_review'")
+        
+        if not pending_sells:
+            await message.answer("📭 No pending sell requests found.", reply_markup=get_admin_menu_keyboard())
+            await state.clear()
+            return
+
+        await conn.execute("UPDATE pending_sells SET status = 'declined' WHERE status = 'pending_review'")
+
+    count = len(pending_sells)
+    await message.answer(f"✅ <b>Successfully cancelled {count} pending Gmail sell requests and notified users!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+
+    for r in pending_sells:
+        sell_id = r['id']
+        uid = r['user_id']
+        asyncio.create_task(send_user_notification(
+            uid,
+            f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request #{sell_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}',
+            parse_mode=ParseMode.HTML
+        ))
+
+    await state.clear()
+
+@dp.message(F.text == "🚫 Cancel Task", StateFilter("*"))
+async def admin_btn_cancel_task(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+
+    async with db_pool.acquire() as conn:
+        count = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status = 'pending_review'")
+
+    if not count:
+        await message.answer("📭 <b>No pending task submissions found to cancel.</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+        return
+
+    await state.set_state(AdminState.waiting_for_bulk_cancel_task_reason)
+    await message.answer(
+        f"🚫 <b>Cancel All Pending Tasks ({count} pending)</b>\n\n"
+        f"Send the single rejection reason message to send to all affected users below:",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_bulk_cancel_task_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_bulk_cancel_task_reason_step(message: Message, state: FSMContext):
+    reason = message.text.strip()
+
+    async with db_pool.acquire() as conn:
+        pending_tasks = await conn.fetch('''
+            SELECT t.id as task_id, ta.user_id 
+            FROM tasks t
+            JOIN task_assignments ta ON t.id = ta.task_id
+            WHERE t.status = 'pending_review'
+        ''')
+
+        if not pending_tasks:
+            await message.answer("📭 No pending task submissions found.", reply_markup=get_admin_menu_keyboard())
+            await state.clear()
+            return
+
+        task_ids = [r['task_id'] for r in pending_tasks]
+
+        async with conn.transaction():
+            await conn.execute("DELETE FROM task_assignments WHERE task_id = ANY($1::int[])", task_ids)
+            await conn.execute("UPDATE tasks SET status = 'available' WHERE id = ANY($1::int[])", task_ids)
+
+    count = len(pending_tasks)
+    await message.answer(f"✅ <b>Successfully cancelled {count} pending tasks, returned them to pool, and notified users!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+
+    for r in pending_tasks:
+        tid = r['task_id']
+        uid = r['user_id']
+        asyncio.create_task(send_user_notification(
+            uid,
+            f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your submission for Task #{tid} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}\n\n<tg-emoji emoji-id="5251203410396458957">🛡</tg-emoji> The task has been returned to the pool.',
+            parse_mode=ParseMode.HTML
+        ))
 
     await state.clear()
 
