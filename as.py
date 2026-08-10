@@ -32,7 +32,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 # ============================================
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
-ADMIN_ID = int(os.environ.get('ADMIN_ID', 6237763207))
+ADMIN_ID = int(os.environ.get('ADMIN_ID', 8856827908))
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # Currency Conversion Rate (1 USD/USDT = 96.30 INR)
@@ -651,7 +651,7 @@ def get_admin_menu_keyboard():
     
     kb.button(text="👑 Transfer Admin", style="danger")
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_change_values_inline_keyboard():
