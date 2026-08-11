@@ -77,7 +77,7 @@ USER_CACHE = {}       # {user_id: dict_data}
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "👥 Referrals", "📁 My Accounts", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
-    "➕ Add Task", "📋 Available Tasks", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🚫 Cancel Sell", "🚫 Cancel Task", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
+    "➕ Add Task", "📋 Tasks", "📋 Available Tasks", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🚫 Cancel Sell", "🚫 Cancel Task", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "⚙️ Change Values", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "⚙️ Validator", "👑 Transfer Admin"
@@ -635,19 +635,24 @@ def get_settings_keyboard(notif_enabled: bool, currency: str):
 
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
+    
+    # 1st Row: Add Task & Available Tasks
     kb.button(text="➕ Add Task", style="success")
     kb.button(text="📋 Available Tasks", style="primary")
+    
+    # 2nd Row: Pending Reviews & Pending Withdrawals
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💸 Pending Withdrawals", style="primary")
     
-    # 3rd Row
+    # 3rd Row: Chat & Unassign Tasks
     kb.button(text="💬 Chat", style="primary")
     kb.button(text="🗑 Unassign Tasks", style="danger")
     
-    # 4th Row
+    # 4th Row: Cancel Sell & Cancel Task
     kb.button(text="🚫 Cancel Sell", style="danger")
     kb.button(text="🚫 Cancel Task", style="danger")
     
+    # 5th Row and beyond
     kb.button(text="🔍 Find ID", style="primary")
     kb.button(text="➕ Add Balance", style="success")
     kb.button(text="➖ Cut Balance", style="danger")
@@ -672,7 +677,7 @@ def get_admin_menu_keyboard():
     kb.button(text="👑 Transfer Admin", style="danger")
     kb.button(text="🏠 Main Menu", style="primary")
     
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_cancel_sell_options_keyboard():
@@ -4329,7 +4334,6 @@ async def pay_withdraw(call: CallbackQuery):
 
         async with conn.transaction():
             await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)
-            # FIX: Update pending transaction note & type in user's history to completed "withdrawal"
             await conn.execute(
                 "UPDATE transactions SET type='withdrawal', note=$1 WHERE user_id=$2 AND note LIKE $3",
                 "Withdrawal paid", user_id, f"%Withdrawal #{withdrawal_id}%"
@@ -4360,14 +4364,12 @@ async def reject_withdraw(call: CallbackQuery):
         payout_amount = w_data['amount']
         method = w_data['method'] or 'UPI'
 
-        # Determine fee to refund total amount back
         fee = UPI_FEES if method == 'UPI' else (USDT_FEES if method == 'USDT BEP-20' else ULTRA_FEES)
         refund_total = payout_amount + fee
 
         async with conn.transaction():
             await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", refund_total, user_id)
-            # Remove pending transaction and log refund
             await conn.execute("DELETE FROM transactions WHERE user_id=$1 AND note LIKE $2", user_id, f"%Withdrawal #{withdrawal_id}%")
             await conn.execute(
                 "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
