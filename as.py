@@ -229,6 +229,10 @@ class AdminState(StatesGroup):
     waiting_for_change_ultra_token = State()
     waiting_for_bulk_cancel_sell_reason = State()
     waiting_for_bulk_cancel_task_reason = State()
+    waiting_for_cancel_sell_by_id_target = State()
+    waiting_for_cancel_sell_by_id_reason = State()
+    waiting_for_cancel_task_by_id_target = State()
+    waiting_for_cancel_task_by_id_reason = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -635,10 +639,15 @@ def get_admin_menu_keyboard():
     kb.button(text="📋 Available Tasks", style="primary")
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💸 Pending Withdrawals", style="primary")
+    
+    # 3rd Row
     kb.button(text="💬 Chat", style="primary")
+    kb.button(text="🗑 Unassign Tasks", style="danger")
+    
+    # 4th Row
     kb.button(text="🚫 Cancel Sell", style="danger")
     kb.button(text="🚫 Cancel Task", style="danger")
-    kb.button(text="🗑 Unassign Tasks", style="danger")
+    
     kb.button(text="🔍 Find ID", style="primary")
     kb.button(text="➕ Add Balance", style="success")
     kb.button(text="➖ Cut Balance", style="danger")
@@ -663,8 +672,22 @@ def get_admin_menu_keyboard():
     kb.button(text="👑 Transfer Admin", style="danger")
     kb.button(text="🏠 Main Menu", style="primary")
     
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup(resize_keyboard=True)
+
+def get_cancel_sell_options_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Cancel All", callback_data="admin_cancel_sell_all", style="danger")
+    kb.button(text="Cancel By Id", callback_data="admin_cancel_sell_by_id", style="primary")
+    kb.adjust(2)
+    return kb.as_markup()
+
+def get_cancel_task_options_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Cancel All", callback_data="admin_cancel_task_all", style="danger")
+    kb.button(text="Cancel By Id", callback_data="admin_cancel_task_by_id", style="primary")
+    kb.adjust(2)
+    return kb.as_markup()
 
 def get_pending_reviews_inline_keyboard():
     kb = InlineKeyboardBuilder()
@@ -2636,6 +2659,10 @@ async def process_chat_message_step(message: Message, state: FSMContext):
 
     await state.clear()
 
+# ============================================
+# CANCEL SELL & CANCEL TASK SUB-MENU SYSTEM
+# ============================================
+
 @dp.message(F.text == "🚫 Cancel Sell", StateFilter("*"))
 async def admin_btn_cancel_sell(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -2649,12 +2676,92 @@ async def admin_btn_cancel_sell(message: Message, state: FSMContext):
         await message.answer("📭 <b>No pending Gmail sell requests found to cancel.</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
         return
 
-    await state.set_state(AdminState.waiting_for_bulk_cancel_sell_reason)
     await message.answer(
-        f"🚫 <b>Cancel All Pending Sell Gmail ({count} pending)</b>\n\n"
-        f"Send the single rejection reason message to send to all affected users below:",
+        f"🚫 <b>Cancel Sell Gmail Dashboard</b>\n\n"
+        f"Currently <b>{count}</b> pending Gmail sell request(s).\n"
+        f"Choose an option below:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_cancel_sell_options_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_cancel_sell_all")
+async def cb_admin_cancel_sell_all(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_bulk_cancel_sell_reason)
+    await call.message.answer(
+        "🚫 <b>Cancel All Pending Sell Gmail</b>\n\n"
+        "Send the single rejection reason message to send to all affected users below:",
         parse_mode=ParseMode.HTML
     )
+
+@dp.callback_query(F.data == "admin_cancel_sell_by_id")
+async def cb_admin_cancel_sell_by_id(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_cancel_sell_by_id_target)
+    await call.message.answer(
+        "🚫 <b>Cancel Sell Gmail By ID</b>\n\n"
+        "Send the target <b>Sell Request ID</b> (e.g., <code>100</code>).\n"
+        "<i>Note: Request #100 and all pending sell requests prior to #100 will be cancelled!</i>",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_cancel_sell_by_id_target, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_cancel_sell_by_id_target_step(message: Message, state: FSMContext):
+    try:
+        target_id = int(message.text.strip())
+        await state.update_data(target_sell_id=target_id)
+        await state.set_state(AdminState.waiting_for_cancel_sell_by_id_reason)
+        await message.answer(
+            f"🚫 Target Sell ID set to <code>#{target_id}</code>.\n\n"
+            f"Now send the single rejection reason message to send to all affected users:",
+            parse_mode=ParseMode.HTML
+        )
+    except ValueError:
+        await message.answer("❌ Invalid Sell ID. Please enter a valid number.", reply_markup=get_admin_menu_keyboard())
+        await state.clear()
+
+@dp.message(AdminState.waiting_for_cancel_sell_by_id_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_cancel_sell_by_id_reason_step(message: Message, state: FSMContext):
+    data = await state.get_data()
+    target_id = data.get('target_sell_id')
+    reason = message.text.strip()
+
+    if not target_id:
+        await message.answer("❌ Error: Target Sell ID lost.", reply_markup=get_admin_menu_keyboard())
+        await state.clear()
+        return
+
+    async with db_pool.acquire() as conn:
+        affected_sells = await conn.fetch(
+            "SELECT id, user_id FROM pending_sells WHERE status = 'pending_review' AND id <= $1",
+            target_id
+        )
+
+        if not affected_sells:
+            await message.answer(f"📭 No pending sell requests found with ID <= <code>#{target_id}</code>.", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+            await state.clear()
+            return
+
+        affected_ids = [r['id'] for r in affected_sells]
+        await conn.execute("UPDATE pending_sells SET status = 'declined' WHERE id = ANY($1::int[])", affected_ids)
+
+    count = len(affected_sells)
+    await message.answer(f"✅ <b>Successfully cancelled {count} pending Gmail sell request(s) up to #{target_id} and notified users!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+
+    for r in affected_sells:
+        sell_id = r['id']
+        uid = r['user_id']
+        asyncio.create_task(send_user_notification(
+            uid,
+            f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request #{sell_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}',
+            parse_mode=ParseMode.HTML
+        ))
+
+    await state.clear()
 
 @dp.message(AdminState.waiting_for_bulk_cancel_sell_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_bulk_cancel_sell_reason_step(message: Message, state: FSMContext):
@@ -2697,12 +2804,97 @@ async def admin_btn_cancel_task(message: Message, state: FSMContext):
         await message.answer("📭 <b>No pending task submissions found to cancel.</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
         return
 
-    await state.set_state(AdminState.waiting_for_bulk_cancel_task_reason)
     await message.answer(
-        f"🚫 <b>Cancel All Pending Tasks ({count} pending)</b>\n\n"
-        f"Send the single rejection reason message to send to all affected users below:",
+        f"🚫 <b>Cancel Pending Tasks Dashboard</b>\n\n"
+        f"Currently <b>{count}</b> pending task submission(s).\n"
+        f"Choose an option below:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_cancel_task_options_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_cancel_task_all")
+async def cb_admin_cancel_task_all(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_bulk_cancel_task_reason)
+    await call.message.answer(
+        "🚫 <b>Cancel All Pending Tasks</b>\n\n"
+        "Send the single rejection reason message to send to all affected users below:",
         parse_mode=ParseMode.HTML
     )
+
+@dp.callback_query(F.data == "admin_cancel_task_by_id")
+async def cb_admin_cancel_task_by_id(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_cancel_task_by_id_target)
+    await call.message.answer(
+        "🚫 <b>Cancel Task Submissions By ID</b>\n\n"
+        "Send the target <b>Task ID</b> (e.g., <code>100</code>).\n"
+        "<i>Note: Task #100 and all pending task submissions prior to #100 will be cancelled!</i>",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_cancel_task_by_id_target, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_cancel_task_by_id_target_step(message: Message, state: FSMContext):
+    try:
+        target_id = int(message.text.strip())
+        await state.update_data(target_task_id=target_id)
+        await state.set_state(AdminState.waiting_for_cancel_task_by_id_reason)
+        await message.answer(
+            f"🚫 Target Task ID set to <code>#{target_id}</code>.\n\n"
+            f"Now send the single rejection reason message to send to all affected users:",
+            parse_mode=ParseMode.HTML
+        )
+    except ValueError:
+        await message.answer("❌ Invalid Task ID. Please enter a valid number.", reply_markup=get_admin_menu_keyboard())
+        await state.clear()
+
+@dp.message(AdminState.waiting_for_cancel_task_by_id_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_cancel_task_by_id_reason_step(message: Message, state: FSMContext):
+    data = await state.get_data()
+    target_id = data.get('target_task_id')
+    reason = message.text.strip()
+
+    if not target_id:
+        await message.answer("❌ Error: Target Task ID lost.", reply_markup=get_admin_menu_keyboard())
+        await state.clear()
+        return
+
+    async with db_pool.acquire() as conn:
+        affected_tasks = await conn.fetch('''
+            SELECT t.id as task_id, ta.user_id 
+            FROM tasks t
+            JOIN task_assignments ta ON t.id = ta.task_id
+            WHERE t.status = 'pending_review' AND t.id <= $1
+        ''', target_id)
+
+        if not affected_tasks:
+            await message.answer(f"📭 No pending task submissions found with ID <= <code>#{target_id}</code>.", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+            await state.clear()
+            return
+
+        affected_task_ids = [r['task_id'] for r in affected_tasks]
+
+        async with conn.transaction():
+            await conn.execute("DELETE FROM task_assignments WHERE task_id = ANY($1::int[])", affected_task_ids)
+            await conn.execute("UPDATE tasks SET status = 'available' WHERE id = ANY($1::int[])", affected_task_ids)
+
+    count = len(affected_tasks)
+    await message.answer(f"✅ <b>Successfully cancelled {count} pending tasks up to #{target_id}, returned them to pool, and notified users!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+
+    for r in affected_tasks:
+        tid = r['task_id']
+        uid = r['user_id']
+        asyncio.create_task(send_user_notification(
+            uid,
+            f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your submission for Task #{tid} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}\n\n<tg-emoji emoji-id="5251203410396458957">🛡</tg-emoji> The task has been returned to the pool.',
+            parse_mode=ParseMode.HTML
+        ))
+
+    await state.clear()
 
 @dp.message(AdminState.waiting_for_bulk_cancel_task_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_bulk_cancel_task_reason_step(message: Message, state: FSMContext):
