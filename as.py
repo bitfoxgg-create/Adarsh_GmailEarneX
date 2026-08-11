@@ -77,7 +77,7 @@ USER_CACHE = {}       # {user_id: dict_data}
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "👥 Referrals", "📁 My Accounts", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
-    "➕ Add Task", "📋 Tasks", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🚫 Cancel Sell", "🚫 Cancel Task", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
+    "➕ Add Task", "📋 Available Tasks", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🚫 Cancel Sell", "🚫 Cancel Task", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "⚙️ Change Values", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "⚙️ Validator", "👑 Transfer Admin"
@@ -632,7 +632,7 @@ def get_settings_keyboard(notif_enabled: bool, currency: str):
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
     kb.button(text="➕ Add Task", style="success")
-    kb.button(text="📋 Tasks", style="primary")
+    kb.button(text="📋 Available Tasks", style="primary")
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💸 Pending Withdrawals", style="primary")
     kb.button(text="💬 Chat", style="primary")
@@ -681,6 +681,29 @@ def get_pending_reviews_inline_keyboard():
         style="primary"
     )
     kb.adjust(2)
+    return kb.as_markup()
+
+def get_pending_withdrawals_inline_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="🏦 UPI",
+        callback_data="admin_view_pending_withdraw_upi",
+        icon_custom_emoji_id="6278557702109013266",
+        style="primary"
+    )
+    kb.button(
+        text="🪙 USDT BEP-20",
+        callback_data="admin_view_pending_withdraw_usdt",
+        icon_custom_emoji_id="5197434882321567830",
+        style="primary"
+    )
+    kb.button(
+        text="⚡️ Ultra Gateway",
+        callback_data="admin_view_pending_withdraw_ultra",
+        icon_custom_emoji_id="5195033767969839232",
+        style="primary"
+    )
+    kb.adjust(3)
     return kb.as_markup()
 
 def get_change_values_inline_keyboard():
@@ -866,6 +889,7 @@ async def render_admin_tasks_page(page: int = 1):
             SELECT t.id, t.title, t.details, t.reward, t.status, ta.user_id 
             FROM tasks t
             LEFT JOIN task_assignments ta ON t.id = ta.task_id
+            WHERE t.status IN ('available', 'assigned')
             ORDER BY t.id DESC
         ''')
 
@@ -883,11 +907,11 @@ async def render_admin_tasks_page(page: int = 1):
     page_items = tasks_rows[start_idx:end_idx]
 
     if total_items == 0:
-        text = "📋 <b>Tasks Management</b>\n\n📭 No tasks found in the database."
+        text = "📋 <b>Available & Assigned Tasks</b>\n\n📭 No available or assigned tasks found in the database."
     else:
         text = (
-            f"📋 <b>Tasks Management</b>\n"
-            f"Showing <b>{start_idx + 1}-{end_idx}</b> of <b>{total_items}</b> total task(s).\n\n"
+            f"📋 <b>Available & Assigned Tasks</b>\n"
+            f"Showing <b>{start_idx + 1}-{end_idx}</b> of <b>{total_items}</b> active task(s).\n\n"
         )
 
         for t in page_items:
@@ -904,14 +928,10 @@ async def render_admin_tasks_page(page: int = 1):
                 status_str = "🟢 Available"
             elif status_raw == 'assigned':
                 status_str = "🔵 Assigned"
-            elif status_raw == 'pending_review':
-                status_str = "🟡 Under Review"
-            elif status_raw == 'completed':
-                status_str = "✅ Completed"
             else:
                 status_str = f"⚪️ {status_raw.capitalize()}"
 
-            user_info_str = "None"
+            user_info_str = "Not Assigned"
             if user_id:
                 try:
                     chat_member = await bot.get_chat(user_id)
@@ -921,9 +941,9 @@ async def render_admin_tasks_page(page: int = 1):
                 user_info_str = f"{username} (<code>{user_id}</code>)"
 
             text += (
-                f"🆔 <b>Task #{task_id}</b> | {status_str}\n"
+                f"🆔 <b>Task #{task_id}</b> | 📌 <b>Type:</b> {status_str}\n"
                 f"📧 <b>Gmail:</b> <code>{email}</code>\n"
-                f"👤 <b>Assigned User:</b> {user_info_str}\n"
+                f"👤 <b>User Info:</b> {user_info_str}\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
             )
 
@@ -1975,7 +1995,7 @@ async def admin_btn_toggle_ref_status(message: Message, state: FSMContext):
     status_str = "🟢 <b>Referral rewards are now ENABLED!</b>" if REF_STATUS else "🔴 <b>Referral rewards are now SILENTLY DISABLED!</b> (Users won't receive bonuses upon approvals)"
     await message.answer(status_str, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
 
-@dp.message(F.text == "📋 Tasks", StateFilter("*"))
+@dp.message(F.text == "📋 Available Tasks", StateFilter("*"))
 async def admin_btn_view_tasks_dashboard(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -2481,18 +2501,55 @@ async def admin_btn_pending_withdrawals(message: Message, state: FSMContext):
     await state.clear()
 
     async with db_pool.acquire() as conn:
-        withdraw_rows = await conn.fetch('''
-            SELECT id, user_id, amount, method, payment_address, created_at
-            FROM withdrawals
-            WHERE status = 'pending'
-            ORDER BY created_at ASC
-        ''')
+        upi_count = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending' AND method = 'UPI'") or 0
+        usdt_count = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending' AND method = 'USDT BEP-20'") or 0
+        ultra_count = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending' AND method = 'Ultra Gateway'") or 0
 
-    if not withdraw_rows:
+    total_pending = upi_count + usdt_count + ultra_count
+
+    if total_pending == 0:
         await message.answer("📭 <b>No pending withdrawal requests found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
         return
 
-    await message.answer(f"💸 <b>Found {len(withdraw_rows)} pending withdrawal request(s). Displaying below:</b>", parse_mode=ParseMode.HTML)
+    text = (
+        f"💸 <b>Pending Withdrawals Dashboard</b>\n\n"
+        f"🏦 <b>UPI Pending:</b> <code>{upi_count}</code>\n"
+        f"🪙 <b>USDT BEP-20 Pending:</b> <code>{usdt_count}</code>\n"
+        f"⚡️ <b>Ultra Gateway Pending:</b> <code>{ultra_count}</code>\n\n"
+        f"Select a method below to review requests:"
+    )
+
+    await message.answer(
+        text, 
+        parse_mode=ParseMode.HTML, 
+        reply_markup=get_pending_withdrawals_inline_keyboard()
+    )
+
+@dp.callback_query(F.data.startswith("admin_view_pending_withdraw_"))
+async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    method_key = call.data.replace("admin_view_pending_withdraw_", "")
+    target_method = "UPI" if method_key == "upi" else ("USDT BEP-20" if method_key == "usdt" else "Ultra Gateway")
+
+    async with db_pool.acquire() as conn:
+        withdraw_rows = await conn.fetch('''
+            SELECT id, user_id, amount, method, payment_address, created_at
+            FROM withdrawals
+            WHERE status = 'pending' AND method = $1
+            ORDER BY created_at ASC
+        ''', target_method)
+
+    if not withdraw_rows:
+        try:
+            await call.message.edit_text(f"📭 <b>No pending withdrawal requests for {target_method}!</b>", parse_mode=ParseMode.HTML)
+        except Exception:
+            await call.message.answer(f"📭 <b>No pending withdrawal requests for {target_method}!</b>", parse_mode=ParseMode.HTML)
+        return
+
+    await call.message.answer(f"💸 <b>Displaying {len(withdraw_rows)} pending withdrawal request(s) for {target_method}:</b>", parse_mode=ParseMode.HTML)
 
     for r in withdraw_rows:
         withdraw_id = r['id']
@@ -2518,9 +2575,9 @@ async def admin_btn_pending_withdrawals(message: Message, state: FSMContext):
             )
         ]])
 
-        address_emoji = '<tg-emoji emoji-id="6152069549442208798">🏦</tg-emoji>' if method == 'UPI' else '<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji>'
+        address_emoji = '<tg-emoji emoji-id="6152069549442208798">🏦</tg-emoji>' if method == 'UPI' else ('<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji>' if method == 'USDT BEP-20' else '<tg-emoji emoji-id="5195033767969839232">⚡️</tg-emoji>')
 
-        await message.answer(
+        await call.message.answer(
             f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
             f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <b>User ID:</b> <code>{user_id}</code>\n'
             f'💳 <b>Method:</b> <code>{method}</code>\n'
@@ -3480,7 +3537,6 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
 
     await call.answer()
 
-    # User's total current balance gets deducted immediately upon placing withdrawal
     total_deducted = bal
     payout_amount = bal - UPI_FEES
 
@@ -3827,14 +3883,15 @@ async def handle_task_submission(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("sa:"))
 async def approve_sell_unified(call: CallbackQuery):
-    await call.answer()
     sell_id = int(call.data.split(":")[1])
 
     async with db_pool.acquire() as conn:
         sell_data = await conn.fetchrow("SELECT user_id, amount, status FROM pending_sells WHERE id=$1", sell_id)
         if not sell_data or sell_data['status'] != 'pending_review':
+            await call.answer("⚠️ This sell Gmail request is already processed!", show_alert=True)
             return
 
+        await call.answer()
         user_id = sell_data['user_id']
         amount = sell_data['amount']
 
@@ -3878,15 +3935,16 @@ async def approve_sell_unified(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("sd:"))
 async def decline_sell_unified(call: CallbackQuery, state: FSMContext):
-    await call.answer()
     sell_id = int(call.data.split(":")[1])
 
     async with db_pool.acquire() as conn:
         sell_data = await conn.fetchrow("SELECT user_id, status FROM pending_sells WHERE id=$1", sell_id)
         if not sell_data or sell_data['status'] != 'pending_review':
+            await call.answer("⚠️ This sell Gmail request is already processed!", show_alert=True)
             return
         user_id = sell_data['user_id']
 
+    await call.answer()
     await state.set_state(AdminState.waiting_for_sell_reject_reason)
     await state.update_data(
         sell_id=sell_id,
@@ -3933,14 +3991,15 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("ta:"))
 async def approve_task(call: CallbackQuery):
-    await call.answer()
     task_id = int(call.data.split(":")[1])
     
     async with db_pool.acquire() as conn:
         task_data = await conn.fetchrow("SELECT reward, status, details FROM tasks WHERE id=$1", task_id)
         if not task_data or task_data['status'] != 'pending_review':
+            await call.answer("⚠️ This task is already processed!", show_alert=True)
             return
 
+        await call.answer()
         reward = task_data['reward']
         assigned_user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
         if not assigned_user_id:
@@ -3993,12 +4052,12 @@ async def approve_task(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("td:"))
 async def decline_task(call: CallbackQuery, state: FSMContext):
-    await call.answer()
     task_id = int(call.data.split(":")[1])
 
     async with db_pool.acquire() as conn:
         task_data = await conn.fetchrow("SELECT status FROM tasks WHERE id=$1", task_id)
         if not task_data or task_data['status'] != 'pending_review':
+            await call.answer("⚠️ This task is already processed!", show_alert=True)
             return
 
         user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
@@ -4006,6 +4065,7 @@ async def decline_task(call: CallbackQuery, state: FSMContext):
     if not user_id:
         return
 
+    await call.answer()
     await state.set_state(AdminState.waiting_for_task_reject_reason)
     await state.update_data(
         task_id=task_id, 
@@ -4055,14 +4115,15 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("wp:"))
 async def pay_withdraw(call: CallbackQuery):
-    await call.answer()
     withdrawal_id = int(call.data.split(":")[1])
 
     async with db_pool.acquire() as conn:
         w_data = await conn.fetchrow("SELECT user_id, amount, status FROM withdrawals WHERE id=$1", withdrawal_id)
         if not w_data or w_data['status'] != 'pending':
+            await call.answer("⚠️ This withdrawal request is already processed!", show_alert=True)
             return
 
+        await call.answer()
         user_id = w_data['user_id']
         payout_amount = w_data['amount']
 
@@ -4081,14 +4142,15 @@ async def pay_withdraw(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("wr:"))
 async def reject_withdraw(call: CallbackQuery):
-    await call.answer()
     withdrawal_id = int(call.data.split(":")[1])
     
     async with db_pool.acquire() as conn:
         w_data = await conn.fetchrow("SELECT user_id, amount, method, status FROM withdrawals WHERE id=$1", withdrawal_id)
         if not w_data or w_data['status'] != 'pending':
+            await call.answer("⚠️ This withdrawal request is already processed!", show_alert=True)
             return
 
+        await call.answer()
         user_id = w_data['user_id']
         payout_amount = w_data['amount']
         method = w_data['method'] or 'UPI'
