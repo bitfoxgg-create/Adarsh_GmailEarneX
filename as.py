@@ -77,7 +77,7 @@ USER_CACHE = {}       # {user_id: dict_data}
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "👥 Referrals", "📁 My Accounts", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
-    "➕ Add Task", "📋 Tasks", "📋 Available Tasks", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🚫 Cancel Sell", "🚫 Cancel Task", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
+    "➕ Add Task", "📋 Tasks", "🟢 Available Tasks", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🚫 Cancel Sell", "🚫 Cancel Task", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "⚙️ Change Values", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "⚙️ Validator", "👑 Transfer Admin"
@@ -636,24 +636,27 @@ def get_settings_keyboard(notif_enabled: bool, currency: str):
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
     
-    # 1st Row: Add Task & Available Tasks
+    # 1st Row: Add Task & All Tasks Dashboard
     kb.button(text="➕ Add Task", style="success")
-    kb.button(text="📋 Available Tasks", style="primary")
+    kb.button(text="📋 Tasks", style="primary")
     
-    # 2nd Row: Pending Reviews & Pending Withdrawals
+    # 2nd Row: Available Tasks & Pending Reviews
+    kb.button(text="🟢 Available Tasks", style="primary")
     kb.button(text="📥 Pending Reviews", style="primary")
+    
+    # 3rd Row: Pending Withdrawals & Chat
     kb.button(text="💸 Pending Withdrawals", style="primary")
-    
-    # 3rd Row: Chat & Unassign Tasks
     kb.button(text="💬 Chat", style="primary")
+    
+    # 4th Row: Unassign Tasks & Cancel Sell
     kb.button(text="🗑 Unassign Tasks", style="danger")
-    
-    # 4th Row: Cancel Sell & Cancel Task
     kb.button(text="🚫 Cancel Sell", style="danger")
-    kb.button(text="🚫 Cancel Task", style="danger")
     
-    # 5th Row and beyond
+    # 5th Row: Cancel Task & Find ID
+    kb.button(text="🚫 Cancel Task", style="danger")
     kb.button(text="🔍 Find ID", style="primary")
+    
+    # Rest of the menu rows
     kb.button(text="➕ Add Balance", style="success")
     kb.button(text="➖ Cut Balance", style="danger")
     kb.button(text="🔎 Check Balance", style="primary")
@@ -906,7 +909,96 @@ async def edit_admin_message(call: CallbackQuery, additional_text: str):
         print(f"Error editing admin message: {e}")
 
 # ============================================
-# PAGINATED TASKS DASHBOARD RENDERER FOR ADMIN
+# PAGINATED ALL TASKS DASHBOARD FOR ADMIN ('📋 Tasks')
+# ============================================
+
+async def render_admin_all_tasks_page(page: int = 1):
+    items_per_page = 10
+
+    async with db_pool.acquire() as conn:
+        tasks_rows = await conn.fetch('''
+            SELECT t.id, t.title, t.details, t.reward, t.status, ta.user_id 
+            FROM tasks t
+            LEFT JOIN task_assignments ta ON t.id = ta.task_id
+            ORDER BY t.id DESC
+        ''')
+
+    total_items = len(tasks_rows)
+    total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
+
+    if page < 1:
+        page = 1
+    elif page > total_pages:
+        page = total_pages
+
+    start_idx = (page - 1) * items_per_page
+    end_idx = min(start_idx + items_per_page, total_items)
+
+    page_items = tasks_rows[start_idx:end_idx]
+
+    if total_items == 0:
+        text = "📋 <b>All System Tasks</b>\n\n📭 No tasks found in the database."
+    else:
+        text = (
+            f"📋 <b>All System Tasks</b>\n"
+            f"Showing <b>{start_idx + 1}-{end_idx}</b> of <b>{total_items}</b> total task(s).\n\n"
+        )
+
+        for t in page_items:
+            task_id = t['id']
+            status_raw = t['status']
+            user_id = t['user_id']
+            
+            try:
+                email = t['details'].split(" | ")[0].replace("Email: ", "").strip()
+            except Exception:
+                email = t['title'].replace("Login to ", "").strip()
+
+            if status_raw == 'available':
+                status_str = "🟢 Available"
+            elif status_raw == 'assigned':
+                status_str = "🔵 Assigned"
+            elif status_raw == 'pending_review':
+                status_str = "🟡 Under Review"
+            elif status_raw == 'completed':
+                status_str = "✅ Completed"
+            else:
+                status_str = f"⚪️ {status_raw.capitalize()}"
+
+            user_info_str = "Not Assigned"
+            if user_id:
+                try:
+                    chat_member = await bot.get_chat(user_id)
+                    username = f"@{chat_member.username}" if chat_member.username else f"ID: {user_id}"
+                except Exception:
+                    username = f"ID: {user_id}"
+                user_info_str = f"{username} (<code>{user_id}</code>)"
+
+            text += (
+                f"🆔 <b>Task #{task_id}</b> | {status_str}\n"
+                f"📧 <b>Gmail:</b> <code>{email}</code>\n"
+                f"👤 <b>User Info:</b> {user_info_str}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+            )
+
+    kb = InlineKeyboardBuilder()
+
+    if total_pages > 1:
+        nav_buttons = []
+        if page > 1:
+            nav_buttons.append(InlineKeyboardButton(text="<- Prev", callback_data=f"adm_all_tasks_page:{page - 1}"))
+        
+        nav_buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+        
+        if page < total_pages:
+            nav_buttons.append(InlineKeyboardButton(text="Next ->", callback_data=f"adm_all_tasks_page:{page + 1}"))
+        
+        kb.row(*nav_buttons)
+
+    return text, kb.as_markup()
+
+# ============================================
+# PAGINATED AVAILABLE TASKS DASHBOARD FOR ADMIN ('🟢 Available Tasks')
 # ============================================
 
 async def render_admin_tasks_page(page: int = 1):
@@ -935,10 +1027,10 @@ async def render_admin_tasks_page(page: int = 1):
     page_items = tasks_rows[start_idx:end_idx]
 
     if total_items == 0:
-        text = "📋 <b>Available & Assigned Tasks</b>\n\n📭 No available or assigned tasks found in the database."
+        text = "🟢 <b>Available & Assigned Tasks</b>\n\n📭 No available or assigned tasks found in the database."
     else:
         text = (
-            f"📋 <b>Available & Assigned Tasks</b>\n"
+            f"🟢 <b>Available & Assigned Tasks</b>\n"
             f"Showing <b>{start_idx + 1}-{end_idx}</b> of <b>{total_items}</b> active task(s).\n\n"
         )
 
@@ -2031,7 +2123,25 @@ async def admin_btn_toggle_ref_status(message: Message, state: FSMContext):
     status_str = "🟢 <b>Referral rewards are now ENABLED!</b>" if REF_STATUS else "🔴 <b>Referral rewards are now SILENTLY DISABLED!</b> (Users won't receive bonuses upon approvals)"
     await message.answer(status_str, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
 
-@dp.message(F.text == "📋 Available Tasks", StateFilter("*"))
+@dp.message(F.text == "📋 Tasks", StateFilter("*"))
+async def admin_btn_view_all_tasks_dashboard(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    text, reply_markup = await render_admin_all_tasks_page(page=1)
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+@dp.callback_query(F.data.startswith("adm_all_tasks_page:"))
+async def cb_admin_all_tasks_page(call: CallbackQuery):
+    await call.answer()
+    page = int(call.data.split(":")[1])
+    text, reply_markup = await render_admin_all_tasks_page(page=page)
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+    except Exception:
+        pass
+
+@dp.message(F.text == "🟢 Available Tasks", StateFilter("*"))
 async def admin_btn_view_tasks_dashboard(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
