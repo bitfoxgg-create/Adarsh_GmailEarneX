@@ -1008,7 +1008,15 @@ async def render_transaction_history_page(target_user_id: int, page: int = 1, is
             amt = tx['amount']
             sign = "+" if amt >= 0 else "-"
             formatted_amt = format_currency(abs(amt), curr)
-            tx_type = (tx['type'] or 'general').upper()
+            
+            raw_type = (tx['type'] or 'general').lower()
+            if raw_type in ['withdrawal', 'withdrawal_paid']:
+                tx_type = "WITHDRAWAL"
+            elif raw_type == 'withdrawal_pending':
+                tx_type = "WITHDRAWAL_PENDING"
+            else:
+                tx_type = raw_type.upper()
+
             date_fmt = tx['created_at'].strftime("%b %d, %Y %I:%M %p")
             note_str = f"\n📝 <i>{tx['note']}</i>" if tx['note'] else ""
 
@@ -3888,7 +3896,7 @@ async def approve_sell_unified(call: CallbackQuery):
     async with db_pool.acquire() as conn:
         sell_data = await conn.fetchrow("SELECT user_id, amount, status FROM pending_sells WHERE id=$1", sell_id)
         if not sell_data or sell_data['status'] != 'pending_review':
-            await call.answer("⚠️ This sell Gmail request is already processed!", show_alert=True)
+            await call.answer("⚠️ This request is already processed!", show_alert=True)
             return
 
         await call.answer()
@@ -3940,7 +3948,7 @@ async def decline_sell_unified(call: CallbackQuery, state: FSMContext):
     async with db_pool.acquire() as conn:
         sell_data = await conn.fetchrow("SELECT user_id, status FROM pending_sells WHERE id=$1", sell_id)
         if not sell_data or sell_data['status'] != 'pending_review':
-            await call.answer("⚠️ This sell Gmail request is already processed!", show_alert=True)
+            await call.answer("⚠️ This request is already processed!", show_alert=True)
             return
         user_id = sell_data['user_id']
 
@@ -3996,7 +4004,7 @@ async def approve_task(call: CallbackQuery):
     async with db_pool.acquire() as conn:
         task_data = await conn.fetchrow("SELECT reward, status, details FROM tasks WHERE id=$1", task_id)
         if not task_data or task_data['status'] != 'pending_review':
-            await call.answer("⚠️ This task is already processed!", show_alert=True)
+            await call.answer("⚠️ This request is already processed!", show_alert=True)
             return
 
         await call.answer()
@@ -4057,7 +4065,7 @@ async def decline_task(call: CallbackQuery, state: FSMContext):
     async with db_pool.acquire() as conn:
         task_data = await conn.fetchrow("SELECT status FROM tasks WHERE id=$1", task_id)
         if not task_data or task_data['status'] != 'pending_review':
-            await call.answer("⚠️ This task is already processed!", show_alert=True)
+            await call.answer("⚠️ This request is already processed!", show_alert=True)
             return
 
         user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
@@ -4120,7 +4128,7 @@ async def pay_withdraw(call: CallbackQuery):
     async with db_pool.acquire() as conn:
         w_data = await conn.fetchrow("SELECT user_id, amount, status FROM withdrawals WHERE id=$1", withdrawal_id)
         if not w_data or w_data['status'] != 'pending':
-            await call.answer("⚠️ This withdrawal request is already processed!", show_alert=True)
+            await call.answer("⚠️ This request is already processed!", show_alert=True)
             return
 
         await call.answer()
@@ -4129,7 +4137,12 @@ async def pay_withdraw(call: CallbackQuery):
 
         async with conn.transaction():
             await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)
-            
+            # FIX: Update pending transaction note & type in user's history to completed "withdrawal"
+            await conn.execute(
+                "UPDATE transactions SET type='withdrawal', note=$1 WHERE user_id=$2 AND note LIKE $3",
+                "Withdrawal paid", user_id, f"%Withdrawal #{withdrawal_id}%"
+            )
+
     invalidate_user_cache(user_id)
     await edit_admin_message(call, '✅ Withdrawal Paid')
 
@@ -4147,7 +4160,7 @@ async def reject_withdraw(call: CallbackQuery):
     async with db_pool.acquire() as conn:
         w_data = await conn.fetchrow("SELECT user_id, amount, method, status FROM withdrawals WHERE id=$1", withdrawal_id)
         if not w_data or w_data['status'] != 'pending':
-            await call.answer("⚠️ This withdrawal request is already processed!", show_alert=True)
+            await call.answer("⚠️ This request is already processed!", show_alert=True)
             return
 
         await call.answer()
@@ -4162,6 +4175,8 @@ async def reject_withdraw(call: CallbackQuery):
         async with conn.transaction():
             await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", refund_total, user_id)
+            # Remove pending transaction and log refund
+            await conn.execute("DELETE FROM transactions WHERE user_id=$1 AND note LIKE $2", user_id, f"%Withdrawal #{withdrawal_id}%")
             await conn.execute(
                 "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
                 user_id, "refund", refund_total, f"Refund for rejected withdrawal #{withdrawal_id}"
