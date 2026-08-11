@@ -3472,16 +3472,16 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
         await call.answer("❌ Please link your UPI ID first before withdrawing via UPI!", show_alert=True)
         return
 
-    required_amount = MIN_WITHDRAWAL_AMT + UPI_FEES
-    if bal < required_amount:
+    if bal < MIN_WITHDRAWAL_AMT:
         min_withdraw_str = format_currency(MIN_WITHDRAWAL_AMT, curr)
-        fee_str = format_currency(UPI_FEES, curr)
         bal_str = format_currency(bal, curr)
-        await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str} + {fee_str} Fee. Current Balance: {bal_str}", show_alert=True)
+        await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
         return
 
     await call.answer()
 
+    # User's total current balance gets deducted immediately upon placing withdrawal
+    total_deducted = bal
     payout_amount = bal - UPI_FEES
 
     async with db_pool.acquire() as conn:
@@ -3493,10 +3493,18 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
             await call.answer("Your Previous Withdrawal is Already Pending, Please Wait it to be Processed", show_alert=True)
             return
 
-        withdraw_id = await conn.fetchval(
-            "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, 'UPI', $3) RETURNING id",
-            user_id, payout_amount, upi
-        )
+        async with conn.transaction():
+            await conn.execute("UPDATE users SET balance = 0 WHERE user_id=$1", user_id)
+            withdraw_id = await conn.fetchval(
+                "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, 'UPI', $3) RETURNING id",
+                user_id, payout_amount, upi
+            )
+            await conn.execute(
+                "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
+                user_id, "withdrawal_pending", -total_deducted, f"UPI Withdrawal #{withdraw_id} pending (Payout: ₹{payout_amount:.2f}, Fee: ₹{UPI_FEES:.2f})"
+            )
+
+    invalidate_user_cache(user_id)
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -3517,18 +3525,20 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id} (UPI)</b>\n\n'
         f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
         f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{user_id}</code>\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{payout_amount:.2f} (Deducted Fee: ₹{UPI_FEES:.2f})\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Net Payout: ₹{payout_amount:.2f} (Fee Charged: ₹{UPI_FEES:.2f})\n'
         f'<tg-emoji emoji-id="6152069549442208798">🏦</tg-emoji> UPI: <code>{upi}</code>',
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
 
-    bal_display = format_currency(payout_amount, curr)
+    payout_display = format_currency(payout_amount, curr)
     fee_display = format_currency(UPI_FEES, curr)
     try:
         await call.message.edit_text(
-            f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of {bal_display} sent to admin using UPI: <code>{upi}</code>\n'
-            f'🏷 <b>Deducted Fee:</b> {fee_display}',
+            f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request submitted!\n\n'
+            f'💰 <b>Net Payout:</b> {payout_display}\n'
+            f'🏷 <b>Deducted Fee:</b> {fee_display}\n'
+            f'🏦 <b>UPI ID:</b> <code>{upi}</code>',
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
@@ -3546,16 +3556,15 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
         await call.answer("❌ Please link your USDT BEP-20 address first before withdrawing!", show_alert=True)
         return
 
-    required_amount = MIN_WITHDRAWAL_AMT + USDT_FEES
-    if bal < required_amount:
+    if bal < MIN_WITHDRAWAL_AMT:
         min_withdraw_str = format_currency(MIN_WITHDRAWAL_AMT, curr)
-        fee_str = format_currency(USDT_FEES, curr)
         bal_str = format_currency(bal, curr)
-        await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str} + {fee_str} Fee. Current Balance: {bal_str}", show_alert=True)
+        await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
         return
 
     await call.answer()
 
+    total_deducted = bal
     payout_amount = bal - USDT_FEES
 
     async with db_pool.acquire() as conn:
@@ -3567,10 +3576,18 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
             await call.answer("Your Previous Withdrawal is Already Pending, Please Wait it to be Processed", show_alert=True)
             return
 
-        withdraw_id = await conn.fetchval(
-            "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, 'USDT BEP-20', $3) RETURNING id",
-            user_id, payout_amount, usdt
-        )
+        async with conn.transaction():
+            await conn.execute("UPDATE users SET balance = 0 WHERE user_id=$1", user_id)
+            withdraw_id = await conn.fetchval(
+                "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, 'USDT BEP-20', $3) RETURNING id",
+                user_id, payout_amount, usdt
+            )
+            await conn.execute(
+                "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
+                user_id, "withdrawal_pending", -total_deducted, f"USDT Withdrawal #{withdraw_id} pending (Payout: ₹{payout_amount:.2f}, Fee: ₹{USDT_FEES:.2f})"
+            )
+
+    invalidate_user_cache(user_id)
 
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -3592,18 +3609,20 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id} (USDT BEP-20)</b>\n\n'
         f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
         f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{user_id}</code>\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Amount: ₹{payout_amount:.2f} (~${usdt_amount:.2f} USDT) (Fee: ₹{USDT_FEES:.2f})\n'
+        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Net Payout: ₹{payout_amount:.2f} (~${usdt_amount:.2f} USDT) (Fee Charged: ₹{USDT_FEES:.2f})\n'
         f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> USDT BEP-20: <code>{usdt}</code>',
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
 
-    bal_display = format_currency(payout_amount, curr)
+    payout_display = format_currency(payout_amount, curr)
     fee_display = format_currency(USDT_FEES, curr)
     try:
         await call.message.edit_text(
-            f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request of {bal_display} (~${usdt_amount:.2f} USDT) sent to admin using USDT address: <code>{usdt}</code>\n'
-            f'🏷 <b>Deducted Fee:</b> {fee_display}',
+            f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request submitted!\n\n'
+            f'💰 <b>Net Payout:</b> {payout_display} (~${usdt_amount:.2f} USDT)\n'
+            f'🏷 <b>Deducted Fee:</b> {fee_display}\n'
+            f'🪙 <b>USDT Address:</b> <code>{usdt}</code>',
             parse_mode=ParseMode.HTML
         )
     except Exception as e:
@@ -3621,12 +3640,10 @@ async def inline_withdraw_ultra_handler(call: CallbackQuery):
         await call.answer("❌ Please link your Ultra Gateway number first before withdrawing!", show_alert=True)
         return
 
-    required_amount = MIN_WITHDRAWAL_AMT + ULTRA_FEES
-    if bal < required_amount:
+    if bal < MIN_WITHDRAWAL_AMT:
         min_withdraw_str = format_currency(MIN_WITHDRAWAL_AMT, curr)
-        fee_str = format_currency(ULTRA_FEES, curr)
         bal_str = format_currency(bal, curr)
-        await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str} + {fee_str} Fee. Current Balance: {bal_str}", show_alert=True)
+        await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
         return
 
     payout_amount = bal - ULTRA_FEES
@@ -3662,7 +3679,7 @@ async def inline_withdraw_ultra_handler(call: CallbackQuery):
     if api_success:
         async with db_pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id=$2", bal, user_id)
+                await conn.execute("UPDATE users SET balance = 0 WHERE user_id=$1", user_id)
                 await conn.execute("INSERT INTO withdrawals(user_id, amount, method, payment_address, status) VALUES ($1, $2, 'Ultra Gateway', $3, 'paid')", user_id, payout_amount, ultra_num)
                 await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "withdrawal", -bal, "Ultra Gateway instant payout paid")
 
@@ -4047,22 +4064,18 @@ async def pay_withdraw(call: CallbackQuery):
             return
 
         user_id = w_data['user_id']
-        amount = w_data['amount']
-
-        await ensure_user(user_id, conn=conn)
+        payout_amount = w_data['amount']
 
         async with conn.transaction():
-            await conn.execute("UPDATE users SET balance = balance - $1 WHERE user_id=$2", amount, user_id)
             await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)
-            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "withdrawal", -amount, "Withdrawal paid")
             
     invalidate_user_cache(user_id)
     await edit_admin_message(call, '✅ Withdrawal Paid')
 
     async def notify_user():
         user_data = await get_user_data(user_id)
-        formatted_amt = format_currency(amount, user_data['currency'])
-        await send_user_notification(user_id, f"🎉 Withdrawal of {formatted_amt} has been paid.")
+        formatted_amt = format_currency(payout_amount, user_data['currency'])
+        await send_user_notification(user_id, f"🎉 Your withdrawal request of {formatted_amt} has been approved and paid!")
 
     asyncio.create_task(notify_user())
 
@@ -4072,15 +4085,40 @@ async def reject_withdraw(call: CallbackQuery):
     withdrawal_id = int(call.data.split(":")[1])
     
     async with db_pool.acquire() as conn:
-        w_data = await conn.fetchrow("SELECT user_id, status FROM withdrawals WHERE id=$1", withdrawal_id)
+        w_data = await conn.fetchrow("SELECT user_id, amount, method, status FROM withdrawals WHERE id=$1", withdrawal_id)
         if not w_data or w_data['status'] != 'pending':
             return
 
         user_id = w_data['user_id']
-        await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
-        
-    await edit_admin_message(call, '⚠️ Withdrawal Rejected')
-    asyncio.create_task(send_user_notification(user_id, '<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request was rejected.', parse_mode=ParseMode.HTML))
+        payout_amount = w_data['amount']
+        method = w_data['method'] or 'UPI'
+
+        # Determine fee to refund total amount back
+        fee = UPI_FEES if method == 'UPI' else (USDT_FEES if method == 'USDT BEP-20' else ULTRA_FEES)
+        refund_total = payout_amount + fee
+
+        async with conn.transaction():
+            await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", refund_total, user_id)
+            await conn.execute(
+                "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
+                user_id, "refund", refund_total, f"Refund for rejected withdrawal #{withdrawal_id}"
+            )
+            
+    invalidate_user_cache(user_id)
+    await edit_admin_message(call, '⚠️ Withdrawal Rejected (Balance Refunded)')
+    
+    async def notify_user_refund():
+        user_data = await get_user_data(user_id)
+        formatted_amt = format_currency(refund_total, user_data['currency'])
+        await send_user_notification(
+            user_id, 
+            f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request #{withdrawal_id} was rejected.\n'
+            f'💰 <b>{formatted_amt}</b> has been refunded back to your balance.', 
+            parse_mode=ParseMode.HTML
+        )
+
+    asyncio.create_task(notify_user_refund())
 
 # ============================================
 # OPTIMIZED AUTO EXPIRE TASKS ENGINE
