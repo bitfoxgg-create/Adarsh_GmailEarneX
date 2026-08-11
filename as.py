@@ -309,9 +309,12 @@ async def init_db():
                 title TEXT, 
                 details TEXT, 
                 reward DOUBLE PRECISION, 
-                status TEXT DEFAULT 'available'
+                status TEXT DEFAULT 'available',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS task_assignments (
                 task_id INT UNIQUE, 
@@ -653,6 +656,23 @@ def get_admin_menu_keyboard():
     kb.button(text="🏠 Main Menu", style="primary")
     kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup(resize_keyboard=True)
+
+def get_pending_reviews_inline_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(
+        text="📨 Sell Gmail",
+        callback_data="admin_view_pending_sells",
+        icon_custom_emoji_id="5377548235709619284",
+        style="primary"
+    )
+    kb.button(
+        text="✍️ Task Gmail",
+        callback_data="admin_view_pending_tasks",
+        icon_custom_emoji_id="5197269100878907942",
+        style="primary"
+    )
+    kb.adjust(2)
+    return kb.as_markup()
 
 def get_change_values_inline_keyboard():
     kb = InlineKeyboardBuilder()
@@ -2192,14 +2212,35 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
     await state.clear()
         
     async with db_pool.acquire() as conn:
-        task_rows = await conn.fetch('''
-            SELECT t.id, t.title, t.details, t.reward, ta.user_id 
-            FROM tasks t 
-            JOIN task_assignments ta ON t.id = ta.task_id 
-            WHERE t.status = 'pending_review'
-            ORDER BY ta.assigned_at ASC
-        ''')
+        task_count = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status = 'pending_review'") or 0
+        sell_count = await conn.fetchval("SELECT COUNT(*) FROM pending_sells WHERE status = 'pending_review'") or 0
+
+    total_pending = task_count + sell_count
         
+    if total_pending == 0:
+        await message.answer("📭 <b>No pending reviews (tasks or sell requests) found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+        return
+
+    text = (
+        f"📥 <b>Pending Reviews Dashboard</b>\n\n"
+        f"📨 <b>Pending Sell Gmail:</b> <code>{sell_count}</code>\n"
+        f"✍️ <b>Pending Task Gmail:</b> <code>{task_count}</code>\n\n"
+        f"Click an option below to view requests:"
+    )
+
+    await message.answer(
+        text, 
+        parse_mode=ParseMode.HTML, 
+        reply_markup=get_pending_reviews_inline_keyboard()
+    )
+
+@dp.callback_query(F.data == "admin_view_pending_sells")
+async def cb_admin_view_pending_sells(call: CallbackQuery):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    async with db_pool.acquire() as conn:
         sell_rows = await conn.fetch('''
             SELECT id, user_id, details, amount 
             FROM pending_sells 
@@ -2207,44 +2248,14 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
             ORDER BY created_at ASC
         ''')
 
-    total_pending = len(task_rows) + len(sell_rows)
-        
-    if total_pending == 0:
-        await message.answer("📭 <b>No pending reviews (tasks or sell requests) found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+    if not sell_rows:
+        try:
+            await call.message.edit_text("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML)
+        except Exception:
+            await call.message.answer("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML)
         return
 
-    await message.answer(f"📥 <b>Found {total_pending} pending item(s). Displaying below:</b>", parse_mode=ParseMode.HTML)
-
-    for r in task_rows:
-        task_id = r['id']
-        title = r['title']
-        reward = r['reward']
-        user_id = r['user_id']
-        details = r['details']
-
-        try:
-            parts = details.split(" | ")
-            email = parts[0].replace("Email: ", "").strip()
-            password = parts[1].replace("Pass: ", "").strip()
-        except Exception:
-            email = title.replace("Login to ", "").strip()
-            password = DEFAULT_TASK_PASS
-        
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text='Approve', callback_data=f'ta:{task_id}', icon_custom_emoji_id="6217663806110175239", style="success"),
-            InlineKeyboardButton(text='Decline', callback_data=f'td:{task_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
-        ]])
-        
-        await message.answer(
-            f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>Pending Task Submission</b>\n\n'
-            f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>User ID:</b> <code>{user_id}</code>\n'
-            f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <b>Task #{task_id}</b>\n'
-            f'📧 <b>Email:</b> <code>{email}</code>\n'
-            f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
-            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}',
-            reply_markup=kb,
-            parse_mode=ParseMode.HTML
-        )
+    await call.message.answer(f"📨 <b>Displaying {len(sell_rows)} pending Gmail sell request(s):</b>", parse_mode=ParseMode.HTML)
 
     for r in sell_rows:
         sell_id = r['id']
@@ -2269,11 +2280,66 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
             InlineKeyboardButton(text="Decline", callback_data=f"sd:{sell_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
         ]])
 
-        await message.answer(
+        await call.message.answer(
             f'<tg-emoji emoji-id="5377548235709619284">📦</tg-emoji> <b>Pending Gmail Sell Request #{sell_id}</b>\n\n'
             f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>User ID:</b> <code>{user_id}</code>\n'
             f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Rate:</b> ₹{amount:.2f}\n\n'
             f'📝 <b>Details:</b>\n{formatted_details}',
+            reply_markup=kb,
+            parse_mode=ParseMode.HTML
+        )
+
+@dp.callback_query(F.data == "admin_view_pending_tasks")
+async def cb_admin_view_pending_tasks(call: CallbackQuery):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    async with db_pool.acquire() as conn:
+        task_rows = await conn.fetch('''
+            SELECT t.id, t.title, t.details, t.reward, ta.user_id 
+            FROM tasks t 
+            JOIN task_assignments ta ON t.id = ta.task_id 
+            WHERE t.status = 'pending_review'
+            ORDER BY ta.assigned_at ASC
+        ''')
+
+    if not task_rows:
+        try:
+            await call.message.edit_text("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML)
+        except Exception:
+            await call.message.answer("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML)
+        return
+
+    await call.message.answer(f"✍️ <b>Displaying {len(task_rows)} pending task submission(s):</b>", parse_mode=ParseMode.HTML)
+
+    for r in task_rows:
+        task_id = r['id']
+        title = r['title']
+        reward = r['reward']
+        user_id = r['user_id']
+        details = r['details']
+
+        try:
+            parts = details.split(" | ")
+            email = parts[0].replace("Email: ", "").strip()
+            password = parts[1].replace("Pass: ", "").strip()
+        except Exception:
+            email = title.replace("Login to ", "").strip()
+            password = DEFAULT_TASK_PASS
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text='Approve', callback_data=f'ta:{task_id}', icon_custom_emoji_id="6217663806110175239", style="success"),
+            InlineKeyboardButton(text='Decline', callback_data=f'td:{task_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
+        ]])
+        
+        await call.message.answer(
+            f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>Pending Task Submission</b>\n\n'
+            f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>User ID:</b> <code>{user_id}</code>\n'
+            f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <b>Task #{task_id}</b>\n'
+            f'📧 <b>Email:</b> <code>{email}</code>\n'
+            f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
+            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}',
             reply_markup=kb,
             parse_mode=ParseMode.HTML
         )
@@ -3893,33 +3959,87 @@ async def reject_withdraw(call: CallbackQuery):
 async def auto_expire_tasks():
     while True:
         try:
-            expired_tasks = []
+            # 1. Check for 30-minute user assignment expiry (release back to pool)
+            30m_expired = []
             async with db_pool.acquire() as conn:
-                rows = await conn.fetch('''
+                rows_30m = await conn.fetch('''
                     SELECT ta.task_id, ta.user_id, ta.assigned_at 
                     FROM task_assignments ta
                     JOIN tasks t ON ta.task_id = t.id
-                    WHERE t.status != 'pending_review'
+                    WHERE t.status = 'assigned'
                 ''')
                 
                 now = datetime.utcnow()
-                for r in rows:
+                for r in rows_30m:
                     if now - r['assigned_at'] > timedelta(minutes=30):
-                        expired_tasks.append((r['task_id'], r['user_id']))
+                        30m_expired.append((r['task_id'], r['user_id']))
 
-                if expired_tasks:
-                    task_ids = [t[0] for t in expired_tasks]
+                if 30m_expired:
+                    task_ids_30m = [t[0] for t in 30m_expired]
                     async with conn.transaction():
-                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', task_ids)
-                        await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids)
+                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', task_ids_30m)
+                        await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids_30m)
 
-            for task_id, user_id in expired_tasks:
+            for task_id, user_id in 30m_expired:
                 asyncio.create_task(send_user_notification(
                     user_id, 
-                    f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Task #{task_id} has expired after 30 minutes.\nThe task was returned to the pool.\n\nUse "Get Task" to get a new task.', 
+                    f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Task #{task_id} time limit expired (30 mins).\nThe task was returned to the pool.', 
                     reply_markup=get_main_menu_keyboard(), 
                     parse_mode=ParseMode.HTML
                 ))
+
+            # 2. Check for 23h 30m Global Task Lifetime Expiry (whether assigned, available, or in pool)
+            expired_lifetime_tasks = []
+            async with db_pool.acquire() as conn:
+                rows_lifetime = await conn.fetch('''
+                    SELECT t.id, t.title, t.details, t.created_at, ta.user_id 
+                    FROM tasks t
+                    LEFT JOIN task_assignments ta ON t.id = ta.task_id
+                    WHERE t.status != 'completed'
+                ''')
+
+                now = datetime.utcnow()
+                for r in rows_lifetime:
+                    created_at = r['created_at'] or now
+                    if now - created_at > timedelta(hours=23, minutes=30):
+                        expired_lifetime_tasks.append({
+                            'id': r['id'],
+                            'details': r['details'],
+                            'user_id': r['user_id']
+                        })
+
+                if expired_lifetime_tasks:
+                    expired_ids = [t['id'] for t in expired_lifetime_tasks]
+                    async with conn.transaction():
+                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', expired_ids)
+                        await conn.execute('DELETE FROM tasks WHERE id = ANY($1::int[])', expired_ids)
+
+            # Send lifetime expiration notifications to admin and affected assigned users
+            for item in expired_lifetime_tasks:
+                task_id = item['id']
+                assigned_u = item['user_id']
+                try:
+                    email_str = item['details'].split(" | ")[0].replace("Email: ", "").strip()
+                except Exception:
+                    email_str = f"Task #{task_id}"
+
+                # Admin Notification
+                admin_notice = f"⏰ <b>Task Expiry Alert:</b>\nTask #{task_id} (<code>{email_str}</code>) expired after 23h 30m and was automatically removed."
+                try:
+                    await bot.send_message(ADMIN_ID, admin_notice, parse_mode=ParseMode.HTML)
+                except Exception:
+                    pass
+
+                # Assigned User Notification
+                if assigned_u:
+                    user_notice = f"⏰ <b>Task Expired:</b>\nYour assigned task #{task_id} (<code>{email_str}</code>) has expired after 23 hours 30 minutes due to lifetime limit reached."
+                    asyncio.create_task(send_user_notification(
+                        assigned_u, 
+                        user_notice, 
+                        reply_markup=get_main_menu_keyboard(), 
+                        parse_mode=ParseMode.HTML
+                    ))
+
         except Exception as e:
             print(f"Error in background task: {e}")
             
