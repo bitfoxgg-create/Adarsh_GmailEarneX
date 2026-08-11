@@ -46,6 +46,7 @@ BANNED_USERS_CACHE = set()
 MUST_JOIN_CHANNEL = None
 BOT_USERNAME = "GmailEarnexBot"
 BOT_STATUS = True           # True = ON, False = OFF
+REF_STATUS = True           # True = ON, False = OFF (Silent Referral Disabling)
 
 # GLOBAL DYNAMIC RATES & DEFAULTS
 DEFAULT_TASK_RATE = 50.0
@@ -76,10 +77,10 @@ USER_CACHE = {}       # {user_id: dict_data}
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "👥 Referrals", "📁 My Accounts", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
-    "➕ Add Task", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🚫 Cancel Sell", "🚫 Cancel Task", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
+    "➕ Add Task", "📋 Tasks", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🚫 Cancel Sell", "🚫 Cancel Task", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "⚙️ Change Values", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
-    "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "⚙️ Validator", "👑 Transfer Admin"
+    "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "⚙️ Validator", "👑 Transfer Admin"
 }
 
 # ============================================
@@ -340,7 +341,7 @@ async def init_db():
         ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
     global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS, UPI_FEES, USDT_FEES, ULTRA_FEES, ULTRA_TOKEN, ULTRA_KEY
     
     async with db_pool.acquire() as conn:
@@ -352,6 +353,9 @@ async def load_settings_and_cache():
 
         status_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='bot_status'")
         BOT_STATUS = (status_val != 'off')
+
+        ref_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='ref_status'")
+        REF_STATUS = (ref_val != 'off')
 
         key_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='emailable_api_key'")
         if key_val:
@@ -628,6 +632,7 @@ def get_settings_keyboard(notif_enabled: bool, currency: str):
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
     kb.button(text="➕ Add Task", style="success")
+    kb.button(text="📋 Tasks", style="primary")
     kb.button(text="📥 Pending Reviews", style="primary")
     kb.button(text="💸 Pending Withdrawals", style="primary")
     kb.button(text="💬 Chat", style="primary")
@@ -650,11 +655,15 @@ def get_admin_menu_keyboard():
     
     status_btn_text = "🟢 Bot Status: ON" if BOT_STATUS else "🔴 Bot Status: OFF"
     kb.button(text=status_btn_text, style="danger" if BOT_STATUS else "success")
-    kb.button(text="⚙️ Validator", style="primary")
     
+    ref_btn_text = "🟢 Ref Status: ON" if REF_STATUS else "🔴 Ref Status: OFF"
+    kb.button(text=ref_btn_text, style="success" if REF_STATUS else "danger")
+    
+    kb.button(text="⚙️ Validator", style="primary")
     kb.button(text="👑 Transfer Admin", style="danger")
     kb.button(text="🏠 Main Menu", style="primary")
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
+    
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_pending_reviews_inline_keyboard():
@@ -844,6 +853,95 @@ async def edit_admin_message(call: CallbackQuery, additional_text: str):
             await call.message.edit_text(text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
     except Exception as e:
         print(f"Error editing admin message: {e}")
+
+# ============================================
+# PAGINATED TASKS DASHBOARD RENDERER FOR ADMIN
+# ============================================
+
+async def render_admin_tasks_page(page: int = 1):
+    items_per_page = 10
+
+    async with db_pool.acquire() as conn:
+        tasks_rows = await conn.fetch('''
+            SELECT t.id, t.title, t.details, t.reward, t.status, ta.user_id 
+            FROM tasks t
+            LEFT JOIN task_assignments ta ON t.id = ta.task_id
+            ORDER BY t.id DESC
+        ''')
+
+    total_items = len(tasks_rows)
+    total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
+
+    if page < 1:
+        page = 1
+    elif page > total_pages:
+        page = total_pages
+
+    start_idx = (page - 1) * items_per_page
+    end_idx = min(start_idx + items_per_page, total_items)
+
+    page_items = tasks_rows[start_idx:end_idx]
+
+    if total_items == 0:
+        text = "📋 <b>Tasks Management</b>\n\n📭 No tasks found in the database."
+    else:
+        text = (
+            f"📋 <b>Tasks Management</b>\n"
+            f"Showing <b>{start_idx + 1}-{end_idx}</b> of <b>{total_items}</b> total task(s).\n\n"
+        )
+
+        for t in page_items:
+            task_id = t['id']
+            status_raw = t['status']
+            user_id = t['user_id']
+            
+            try:
+                email = t['details'].split(" | ")[0].replace("Email: ", "").strip()
+            except Exception:
+                email = t['title'].replace("Login to ", "").strip()
+
+            if status_raw == 'available':
+                status_str = "🟢 Available"
+            elif status_raw == 'assigned':
+                status_str = "🔵 Assigned"
+            elif status_raw == 'pending_review':
+                status_str = "🟡 Under Review"
+            elif status_raw == 'completed':
+                status_str = "✅ Completed"
+            else:
+                status_str = f"⚪️ {status_raw.capitalize()}"
+
+            user_info_str = "None"
+            if user_id:
+                try:
+                    chat_member = await bot.get_chat(user_id)
+                    username = f"@{chat_member.username}" if chat_member.username else f"ID: {user_id}"
+                except Exception:
+                    username = f"ID: {user_id}"
+                user_info_str = f"{username} (<code>{user_id}</code>)"
+
+            text += (
+                f"🆔 <b>Task #{task_id}</b> | {status_str}\n"
+                f"📧 <b>Gmail:</b> <code>{email}</code>\n"
+                f"👤 <b>Assigned User:</b> {user_info_str}\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+            )
+
+    kb = InlineKeyboardBuilder()
+
+    if total_pages > 1:
+        nav_buttons = []
+        if page > 1:
+            nav_buttons.append(InlineKeyboardButton(text="<- Prev", callback_data=f"adm_tasks_page:{page - 1}"))
+        
+        nav_buttons.append(InlineKeyboardButton(text=f"{page}/{total_pages}", callback_data="noop"))
+        
+        if page < total_pages:
+            nav_buttons.append(InlineKeyboardButton(text="Next ->", callback_data=f"adm_tasks_page:{page + 1}"))
+        
+        kb.row(*nav_buttons)
+
+    return text, kb.as_markup()
 
 # ============================================
 # PAGINATED TRANSACTION HISTORY RENDERER
@@ -1862,6 +1960,38 @@ async def admin_btn_toggle_status(message: Message, state: FSMContext):
 
     status_str = "🟢 <b>Bot is now ONLINE and ENABLED for all users!</b>" if BOT_STATUS else "🔴 <b>Bot is now OFF and DISABLED for normal users!</b>"
     await message.answer(status_str, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+
+@dp.message(F.text.in_({"🔴 Ref Status: OFF", "🟢 Ref Status: ON"}), StateFilter("*"))
+async def admin_btn_toggle_ref_status(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    global REF_STATUS
+    REF_STATUS = not REF_STATUS
+    new_val = 'on' if REF_STATUS else 'off'
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('ref_status', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
+
+    status_str = "🟢 <b>Referral rewards are now ENABLED!</b>" if REF_STATUS else "🔴 <b>Referral rewards are now SILENTLY DISABLED!</b> (Users won't receive bonuses upon approvals)"
+    await message.answer(status_str, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+
+@dp.message(F.text == "📋 Tasks", StateFilter("*"))
+async def admin_btn_view_tasks_dashboard(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    text, reply_markup = await render_admin_tasks_page(page=1)
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+@dp.callback_query(F.data.startswith("adm_tasks_page:"))
+async def cb_admin_tasks_page(call: CallbackQuery):
+    await call.answer()
+    page = int(call.data.split(":")[1])
+    text, reply_markup = await render_admin_tasks_page(page=page)
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+    except Exception:
+        pass
 
 @dp.message(F.text == "⚙️ Validator", StateFilter("*"))
 async def admin_btn_validator_menu(message: Message, state: FSMContext):
@@ -3700,7 +3830,7 @@ async def approve_sell_unified(call: CallbackQuery):
 
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
 
-        if referred_by and referred_by != user_id:
+        if REF_STATUS and referred_by and referred_by != user_id:
             await ensure_user(referred_by, conn=conn)
             ref_reward = REFERRAL_SELL_BONUS
             async with conn.transaction():
@@ -3815,7 +3945,7 @@ async def approve_task(call: CallbackQuery):
 
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
 
-        if referred_by and referred_by != user_id:
+        if REF_STATUS and referred_by and referred_by != user_id:
             await ensure_user(referred_by, conn=conn)
             ref_reward = REFERRAL_TASK_BONUS
             async with conn.transaction():
