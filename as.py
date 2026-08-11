@@ -3960,7 +3960,7 @@ async def auto_expire_tasks():
     while True:
         try:
             # 1. Check for 30-minute user assignment expiry (release back to pool)
-            30m_expired = []
+            expired_30m = []
             async with db_pool.acquire() as conn:
                 rows_30m = await conn.fetch('''
                     SELECT ta.task_id, ta.user_id, ta.assigned_at 
@@ -3972,15 +3972,15 @@ async def auto_expire_tasks():
                 now = datetime.utcnow()
                 for r in rows_30m:
                     if now - r['assigned_at'] > timedelta(minutes=30):
-                        30m_expired.append((r['task_id'], r['user_id']))
+                        expired_30m.append((r['task_id'], r['user_id']))
 
-                if 30m_expired:
-                    task_ids_30m = [t[0] for t in 30m_expired]
+                if expired_30m:
+                    task_ids_30m = [t[0] for t in expired_30m]
                     async with conn.transaction():
                         await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', task_ids_30m)
                         await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids_30m)
 
-            for task_id, user_id in 30m_expired:
+            for task_id, user_id in expired_30m:
                 asyncio.create_task(send_user_notification(
                     user_id, 
                     f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Task #{task_id} time limit expired (30 mins).\nThe task was returned to the pool.', 
