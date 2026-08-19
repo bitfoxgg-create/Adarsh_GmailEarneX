@@ -719,7 +719,7 @@ def get_pending_withdrawals_inline_keyboard():
     kb.button(
         text="🏦 UPI",
         callback_data="admin_view_pending_withdraw_upi",
-        icon_custom_emoji_id="6278557702109013266",
+        icon_custom_emoji_id="6291696801636424911",
         style="primary"
     )
     kb.button(
@@ -827,7 +827,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool, ultra_set: bool =
     usdt_link_text = "Change USDT" if usdt_set else "Link USDT BEP-20"
     ultra_link_text = "Change Ultra" if ultra_set else "Link Ultra Gateway"
     
-    upi_emoji = "6278557702109013266" if upi_set else "5902449142575141204"
+    upi_emoji = "6291696801636424911" if upi_set else "5902449142575141204"
     usdt_emoji = "5197434882321567830" if usdt_set else "5902449142575141204"
     ultra_emoji = "5195033767969839232" if ultra_set else "5902449142575141204"
 
@@ -850,7 +850,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool, ultra_set: bool =
 
 def get_withdraw_options_keyboard():
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"Withdraw via UPI (Fee: ₹{UPI_FEES:.2f})", callback_data="withdraw_upi", icon_custom_emoji_id="6278557702109013266", style="success")
+    kb.button(text=f"Withdraw via UPI (Fee: ₹{UPI_FEES:.2f})", callback_data="withdraw_upi", icon_custom_emoji_id="6291696801636424911", style="success")
     kb.button(text=f"Withdraw via USDT BEP-20 (Fee: ₹{USDT_FEES:.2f})", callback_data="withdraw_usdt", icon_custom_emoji_id="5197434882321567830", style="success")
     kb.button(text=f"Withdraw via Ultra Gateway (0 Fees)", callback_data="withdraw_ultra", icon_custom_emoji_id="5195033767969839232", style="success")
     kb.button(
@@ -1755,7 +1755,7 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
     text = (
         f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance</b>\n\n'
         f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Available:</b> {formatted_bal}\n'
-        f'<tg-emoji emoji-id="6278557702109013266">🏦</tg-emoji> <b>UPI:</b> <code>{upi}</code>\n'
+        f'<tg-emoji emoji-id="6291696801636424911">🏦</tg-emoji> <b>UPI:</b> <code>{upi}</code>\n'
         f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> <b>USDT BEP-20:</b> <code>{usdt}</code>\n'
         f'<tg-emoji emoji-id="5195033767969839232">⚡️</tg-emoji> <b>Ultra Gateway:</b> <code>{ultra}</code>'
     )
