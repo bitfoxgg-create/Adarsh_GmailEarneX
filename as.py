@@ -47,6 +47,7 @@ MUST_JOIN_CHANNEL = None
 BOT_USERNAME = "GmailEarnexBot"
 BOT_STATUS = True           # True = ON, False = OFF
 REF_STATUS = True           # True = ON, False = OFF (Silent Referral Disabling)
+ULTRA_STATUS = True         # True = ON, False = OFF
 
 # GLOBAL DYNAMIC RATES & DEFAULTS
 DEFAULT_TASK_RATE = 50.0
@@ -80,7 +81,8 @@ MENU_BUTTONS = {
     "➕ Add Task", "📋 Tasks", "🟢 Available Tasks", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🚫 Cancel Sell", "🚫 Cancel Task", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "⚙️ Change Values", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
-    "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "⚙️ Validator", "👑 Transfer Admin"
+    "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "⚙️ Validator", "👑 Transfer Admin",
+    "🟢 Ultra Status: ON", "🔴 Ultra Status: OFF"
 }
 
 # ============================================
@@ -345,7 +347,7 @@ async def init_db():
         ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
     global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS, UPI_FEES, USDT_FEES, ULTRA_FEES, ULTRA_TOKEN, ULTRA_KEY
     
     async with db_pool.acquire() as conn:
@@ -360,6 +362,9 @@ async def load_settings_and_cache():
 
         ref_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='ref_status'")
         REF_STATUS = (ref_val != 'off')
+
+        ultra_stat = await conn.fetchval("SELECT value FROM bot_settings WHERE key='ultra_status'")
+        ULTRA_STATUS = (ultra_stat != 'off')
 
         key_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='emailable_api_key'")
         if key_val:
@@ -449,8 +454,8 @@ async def ensure_user(user_id: int, referrer_id: int = None, conn=None) -> bool:
     if conn:
         await _run_ensure(conn)
     else:
-        async with db_pool.acquire() as c:
-            await _run_ensure(c)
+        async with db_pool.acquire() as conn:
+            await _run_ensure(conn)
 
     return is_new
 
@@ -676,11 +681,15 @@ def get_admin_menu_keyboard():
     ref_btn_text = "🟢 Ref Status: ON" if REF_STATUS else "🔴 Ref Status: OFF"
     kb.button(text=ref_btn_text, style="success" if REF_STATUS else "danger")
     
+    # Validator & Ultra Status row
     kb.button(text="⚙️ Validator", style="primary")
+    ultra_btn_text = "🟢 Ultra Status: ON" if ULTRA_STATUS else "🔴 Ultra Status: OFF"
+    kb.button(text=ultra_btn_text, style="success" if ULTRA_STATUS else "danger")
+
     kb.button(text="👑 Transfer Admin", style="danger")
     kb.button(text="🏠 Main Menu", style="primary")
     
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_cancel_sell_options_keyboard():
@@ -728,13 +737,16 @@ def get_pending_withdrawals_inline_keyboard():
         icon_custom_emoji_id="5197434882321567830",
         style="primary"
     )
-    kb.button(
-        text="⚡️ Ultra Gateway",
-        callback_data="admin_view_pending_withdraw_ultra",
-        icon_custom_emoji_id="5195033767969839232",
-        style="primary"
-    )
-    kb.adjust(3)
+    if ULTRA_STATUS:
+        kb.button(
+            text="⚡️ Ultra Gateway",
+            callback_data="admin_view_pending_withdraw_ultra",
+            icon_custom_emoji_id="5195033767969839232",
+            style="primary"
+        )
+        kb.adjust(3)
+    else:
+        kb.adjust(2)
     return kb.as_markup()
 
 def get_change_values_inline_keyboard():
@@ -825,15 +837,18 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool, ultra_set: bool =
     kb = InlineKeyboardBuilder()
     upi_link_text = "Change UPI" if upi_set else "Link UPI"
     usdt_link_text = "Change USDT" if usdt_set else "Link USDT BEP-20"
-    ultra_link_text = "Change Ultra" if ultra_set else "Link Ultra Gateway"
     
     upi_emoji = "6291696801636424911" if upi_set else "5902449142575141204"
     usdt_emoji = "5197434882321567830" if usdt_set else "5902449142575141204"
-    ultra_emoji = "5195033767969839232" if ultra_set else "5902449142575141204"
 
     kb.button(text=upi_link_text, callback_data="link_upi", icon_custom_emoji_id=upi_emoji, style="primary")
     kb.button(text=usdt_link_text, callback_data="link_usdt", icon_custom_emoji_id=usdt_emoji, style="primary")
-    kb.button(text=ultra_link_text, callback_data="link_ultra", icon_custom_emoji_id=ultra_emoji, style="primary")
+    
+    if ULTRA_STATUS:
+        ultra_link_text = "Change Ultra" if ultra_set else "Link Ultra Gateway"
+        ultra_emoji = "5195033767969839232" if ultra_set else "5902449142575141204"
+        kb.button(text=ultra_link_text, callback_data="link_ultra", icon_custom_emoji_id=ultra_emoji, style="primary")
+
     kb.button(
         text="Withdraw", 
         callback_data="choose_withdraw_method", 
@@ -845,20 +860,27 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool, ultra_set: bool =
         callback_data="menu_back",
         icon_custom_emoji_id="5352759161945867747"
     )
-    kb.adjust(2, 1, 1, 1)
+    if ULTRA_STATUS:
+        kb.adjust(2, 1, 1, 1)
+    else:
+        kb.adjust(2, 1, 1)
     return kb.as_markup()
 
 def get_withdraw_options_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(text=f"Withdraw via UPI (Fee: ₹{UPI_FEES:.2f})", callback_data="withdraw_upi", icon_custom_emoji_id="6291696801636424911", style="success")
     kb.button(text=f"Withdraw via USDT BEP-20 (Fee: ₹{USDT_FEES:.2f})", callback_data="withdraw_usdt", icon_custom_emoji_id="5197434882321567830", style="success")
-    kb.button(text=f"Withdraw via Ultra Gateway (0 Fees)", callback_data="withdraw_ultra", icon_custom_emoji_id="5195033767969839232", style="success")
+    if ULTRA_STATUS:
+        kb.button(text=f"Withdraw via Ultra Gateway (0 Fees)", callback_data="withdraw_ultra", icon_custom_emoji_id="5195033767969839232", style="success")
     kb.button(
         text="Back",
         callback_data="menu_balance",
         icon_custom_emoji_id="5352759161945867747"
     )
-    kb.adjust(1, 1, 1, 1)
+    if ULTRA_STATUS:
+        kb.adjust(1, 1, 1, 1)
+    else:
+        kb.adjust(1, 1, 1)
     return kb.as_markup()
 
 def get_back_inline_keyboard():
@@ -1752,12 +1774,14 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
     ultra_set = ultra != "None" and ultra != ""
     formatted_bal = format_currency(bal, curr)
     
+    ultra_line = f'\n<tg-emoji emoji-id="5195033767969839232">⚡️</tg-emoji> <b>Ultra Gateway:</b> <code>{ultra}</code>' if ULTRA_STATUS else ""
+    
     text = (
         f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance</b>\n\n'
         f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Available:</b> {formatted_bal}\n'
         f'<tg-emoji emoji-id="6291696801636424911">🏦</tg-emoji> <b>UPI:</b> <code>{upi}</code>\n'
-        f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> <b>USDT BEP-20:</b> <code>{usdt}</code>\n'
-        f'<tg-emoji emoji-id="5195033767969839232">⚡️</tg-emoji> <b>Ultra Gateway:</b> <code>{ultra}</code>'
+        f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> <b>USDT BEP-20:</b> <code>{usdt}</code>'
+        f'{ultra_line}'
     )
     
     try:
@@ -2121,6 +2145,20 @@ async def admin_btn_toggle_ref_status(message: Message, state: FSMContext):
         await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('ref_status', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
 
     status_str = "🟢 <b>Referral rewards are now ENABLED!</b>" if REF_STATUS else "🔴 <b>Referral rewards are now SILENTLY DISABLED!</b> (Users won't receive bonuses upon approvals)"
+    await message.answer(status_str, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+
+@dp.message(F.text.in_({"🔴 Ultra Status: OFF", "🟢 Ultra Status: ON"}), StateFilter("*"))
+async def admin_btn_toggle_ultra_status(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    global ULTRA_STATUS
+    ULTRA_STATUS = not ULTRA_STATUS
+    new_val = 'on' if ULTRA_STATUS else 'off'
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('ultra_status', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
+
+    status_str = "🟢 <b>Ultra Gateway is now ON and available in withdrawal options!</b>" if ULTRA_STATUS else "🔴 <b>Ultra Gateway is now OFF and hidden from withdrawal options!</b>"
     await message.answer(status_str, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
 
 @dp.message(F.text == "📋 Tasks", StateFilter("*"))
@@ -2657,11 +2695,13 @@ async def admin_btn_pending_withdrawals(message: Message, state: FSMContext):
         await message.answer("📭 <b>No pending withdrawal requests found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
         return
 
+    ultra_line = f"\n⚡️ <b>Ultra Gateway Pending:</b> <code>{ultra_count}</code>" if ULTRA_STATUS else ""
+
     text = (
         f"💸 <b>Pending Withdrawals Dashboard</b>\n\n"
         f"🏦 <b>UPI Pending:</b> <code>{upi_count}</code>\n"
-        f"🪙 <b>USDT BEP-20 Pending:</b> <code>{usdt_count}</code>\n"
-        f"⚡️ <b>Ultra Gateway Pending:</b> <code>{ultra_count}</code>\n\n"
+        f"🪙 <b>USDT BEP-20 Pending:</b> <code>{usdt_count}</code>"
+        f"{ultra_line}\n\n"
         f"Select a method below to review requests:"
     )
 
@@ -3805,6 +3845,9 @@ async def start_link_usdt(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "link_ultra")
 async def start_link_ultra(call: CallbackQuery, state: FSMContext):
+    if not ULTRA_STATUS:
+        await call.answer("❌ Ultra Gateway is currently disabled by Admin!", show_alert=True)
+        return
     await call.answer()
     await state.set_state(UserState.setting_ultra)
     await call.message.answer(
@@ -4001,6 +4044,10 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
 
 @dp.callback_query(F.data == "withdraw_ultra")
 async def inline_withdraw_ultra_handler(call: CallbackQuery):
+    if not ULTRA_STATUS:
+        await call.answer("❌ Ultra Gateway is currently disabled by Admin!", show_alert=True)
+        return
+
     user_id = call.from_user.id
     user_data = await get_user_data(user_id)
     bal = user_data['balance'] if user_data else 0.0
