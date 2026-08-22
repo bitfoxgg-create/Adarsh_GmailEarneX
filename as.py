@@ -48,6 +48,8 @@ BOT_USERNAME = "GmailEarnexBot"
 BOT_STATUS = True           # True = ON, False = OFF
 REF_STATUS = True           # True = ON, False = OFF (Silent Referral Disabling)
 ULTRA_STATUS = True         # True = ON, False = OFF
+SINGLE_TASK_STATUS = True   # True = 1/1 task (must wait for review), False = Unlimited tasks concurrently
+SELL_GMAIL_STATUS = True    # True = Enabled, False = Disabled
 
 # GLOBAL DYNAMIC RATES & DEFAULTS
 DEFAULT_TASK_RATE = 50.0
@@ -347,7 +349,7 @@ async def init_db():
         ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
     global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS, UPI_FEES, USDT_FEES, ULTRA_FEES, ULTRA_TOKEN, ULTRA_KEY
     
     async with db_pool.acquire() as conn:
@@ -365,6 +367,12 @@ async def load_settings_and_cache():
 
         ultra_stat = await conn.fetchval("SELECT value FROM bot_settings WHERE key='ultra_status'")
         ULTRA_STATUS = (ultra_stat != 'off')
+
+        single_task_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='single_task_status'")
+        SINGLE_TASK_STATUS = (single_task_val != 'off')
+
+        sell_gmail_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='sell_gmail_status'")
+        SELL_GMAIL_STATUS = (sell_gmail_val != 'off')
 
         key_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='emailable_api_key'")
         if key_val:
@@ -787,7 +795,24 @@ def get_change_values_inline_keyboard():
         icon_custom_emoji_id="6005570495603282482",
         style="primary"
     )
-    kb.adjust(1, 1, 1, 1, 1, 1)
+    
+    single_task_btn_text = f"7. Single Tasks: {'🟢 ON' if SINGLE_TASK_STATUS else '🔴 OFF'}"
+    kb.button(
+        text=single_task_btn_text,
+        callback_data="admin_toggle_single_task",
+        icon_custom_emoji_id="5197269100878907942",
+        style="success" if SINGLE_TASK_STATUS else "danger"
+    )
+
+    sell_gmail_btn_text = f"8. Sell Gmail: {'🟢 ON' if SELL_GMAIL_STATUS else '🔴 OFF'}"
+    kb.button(
+        text=sell_gmail_btn_text,
+        callback_data="admin_toggle_sell_gmail",
+        icon_custom_emoji_id="5377548235709619284",
+        style="success" if SELL_GMAIL_STATUS else "danger"
+    )
+
+    kb.adjust(1, 1, 1, 1, 1, 1, 1, 1)
     return kb.as_markup()
 
 def get_validator_admin_inline_keyboard():
@@ -1666,6 +1691,8 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
             FROM task_assignments a
             JOIN tasks t ON a.task_id = t.id
             WHERE a.user_id=$1
+            ORDER BY a.assigned_at DESC
+            LIMIT 1
         ''', user_id)
         
         if existing:
@@ -1674,49 +1701,50 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
             task_status = existing['status']
             
             if task_status == 'pending_review':
-                txt = '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Your task submission is currently under admin review. Please wait for approval.'
-                try:
-                    await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
-                except:
-                    await call.message.answer(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
-                await state.update_data(last_menu_msg_id=call.message.message_id)
-                return
-
-            expire_time = assigned_time + timedelta(minutes=30)
-            remaining = expire_time - datetime.utcnow()
-            total_seconds = int(remaining.total_seconds())
-            
-            if total_seconds > 0:
-                mins = total_seconds // 60
-                secs = total_seconds % 60
+                if SINGLE_TASK_STATUS:
+                    txt = '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Your task submission is currently under admin review. Please wait for approval before taking another task.'
+                    try:
+                        await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+                    except:
+                        await call.message.answer(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+                    await state.update_data(last_menu_msg_id=call.message.message_id)
+                    return
+            elif task_status == 'assigned':
+                expire_time = assigned_time + timedelta(minutes=30)
+                remaining = expire_time - datetime.utcnow()
+                total_seconds = int(remaining.total_seconds())
                 
-                try:
-                    parts = existing['details'].split(" | ")
-                    username = parts[0].replace("Email: ", "").strip()
-                    password = parts[1].replace("Pass: ", "").strip()
-                except:
-                    username = existing['title'].replace("Login to ", "")
-                    password = "See Admin"
+                if total_seconds > 0:
+                    mins = total_seconds // 60
+                    secs = total_seconds % 60
+                    
+                    try:
+                        parts = existing['details'].split(" | ")
+                        username = parts[0].replace("Email: ", "").strip()
+                        password = parts[1].replace("Pass: ", "").strip()
+                    except:
+                        username = existing['title'].replace("Login to ", "")
+                        password = "See Admin"
 
-                reward_str = format_currency(existing["reward"], user_curr)
-                txt = (
-                    f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>You already have an active task.</b>\n\n'
-                    f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Your Current Task</b>\n\n'
-                    f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> #{task_id}\n'
-                    f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> {username} | <tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
-                    f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> {reward_str}\n\n'
-                    f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Time Remaining: {mins}m {secs}s'
-                )
-                try:
-                    await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
-                except:
-                    await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
-                await state.update_data(last_menu_msg_id=call.message.message_id)
-                return
-            else:
-                async with conn.transaction():
-                    await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
-                    await conn.execute('UPDATE tasks SET status=$1 WHERE id=$2', 'available', task_id)
+                    reward_str = format_currency(existing["reward"], user_curr)
+                    txt = (
+                        f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>You already have an active task.</b>\n\n'
+                        f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Your Current Task</b>\n\n'
+                        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> #{task_id}\n'
+                        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> {username} | <tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
+                        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> {reward_str}\n\n'
+                        f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Time Remaining: {mins}m {secs}s'
+                    )
+                    try:
+                        await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+                    except:
+                        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+                    await state.update_data(last_menu_msg_id=call.message.message_id)
+                    return
+                else:
+                    async with conn.transaction():
+                        await conn.execute('DELETE FROM task_assignments WHERE user_id=$1 AND task_id=$2', user_id, task_id)
+                        await conn.execute('UPDATE tasks SET status=$1 WHERE id=$2', 'available', task_id)
 
         task = await conn.fetchrow("SELECT id, title, details, reward FROM tasks WHERE status='available' ORDER BY RANDOM() LIMIT 1")
         if not task:
@@ -1792,6 +1820,10 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "menu_sell_gmail")
 async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
+    if not SELL_GMAIL_STATUS:
+        await call.answer("⚠️ Selling Gmail is currently disabled by Admin!", show_alert=True)
+        return
+
     await call.answer()
     await state.clear()
     await state.set_state(UserState.selling_username)
@@ -1809,6 +1841,11 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
 
 @dp.message(UserState.selling_username, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_username(message: Message, state: FSMContext):
+    if not SELL_GMAIL_STATUS:
+        await message.answer("⚠️ Selling Gmail is currently disabled by Admin!", reply_markup=get_main_menu_keyboard())
+        await state.clear()
+        return
+
     username_input = message.text.strip()
     if "@gmail.com" not in username_input.lower() and "@" not in username_input:
         username = f"{username_input}@gmail.com"
@@ -1859,6 +1896,11 @@ async def process_sell_username(message: Message, state: FSMContext):
 
 @dp.message(UserState.selling_password, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_password(message: Message, state: FSMContext):
+    if not SELL_GMAIL_STATUS:
+        await message.answer("⚠️ Selling Gmail is currently disabled by Admin!", reply_markup=get_main_menu_keyboard())
+        await state.clear()
+        return
+
     password = message.text.strip()
     data = await state.get_data()
     username = data.get('sell_username')
@@ -3535,10 +3577,82 @@ async def admin_btn_change_values(message: Message, state: FSMContext):
         f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
         f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
         f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
-        f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n\n"
+        f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
+        f"✍️ <b>Single Tasks System:</b> {'🟢 ON (1 Task at a time)' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited tasks without waiting for review)'}\n"
+        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n\n"
         f"Select an option below to update:"
     )
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_change_values_inline_keyboard())
+
+@dp.callback_query(F.data == "admin_toggle_single_task")
+async def cb_admin_toggle_single_task(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    global SINGLE_TASK_STATUS
+    SINGLE_TASK_STATUS = not SINGLE_TASK_STATUS
+    new_val = 'on' if SINGLE_TASK_STATUS else 'off'
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('single_task_status', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
+
+    await call.answer(f"Single Tasks is now {'ON' if SINGLE_TASK_STATUS else 'OFF'}!", show_alert=True)
+    
+    task_usd = DEFAULT_TASK_RATE / USD_TO_INR
+    sell_usd = GMAIL_SELL_RATE / USD_TO_INR
+    min_w_usd = MIN_WITHDRAWAL_AMT / USD_TO_INR
+
+    text = (
+        f"⚙️ <b>Change System Rates & Limits</b>\n\n"
+        f"📝 <b>Current Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} (${task_usd:.2f})\n"
+        f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
+        f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
+        f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
+        f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
+        f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
+        f"✍️ <b>Single Tasks System:</b> {'🟢 ON (1 Task at a time)' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited tasks without waiting for review)'}\n"
+        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n\n"
+        f"Select an option below to update:"
+    )
+
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_change_values_inline_keyboard())
+    except Exception:
+        pass
+
+@dp.callback_query(F.data == "admin_toggle_sell_gmail")
+async def cb_admin_toggle_sell_gmail(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    global SELL_GMAIL_STATUS
+    SELL_GMAIL_STATUS = not SELL_GMAIL_STATUS
+    new_val = 'on' if SELL_GMAIL_STATUS else 'off'
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('sell_gmail_status', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
+
+    await call.answer(f"Sell Gmail is now {'ON' if SELL_GMAIL_STATUS else 'OFF'}!", show_alert=True)
+    
+    task_usd = DEFAULT_TASK_RATE / USD_TO_INR
+    sell_usd = GMAIL_SELL_RATE / USD_TO_INR
+    min_w_usd = MIN_WITHDRAWAL_AMT / USD_TO_INR
+
+    text = (
+        f"⚙️ <b>Change System Rates & Limits</b>\n\n"
+        f"📝 <b>Current Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} (${task_usd:.2f})\n"
+        f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
+        f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
+        f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
+        f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
+        f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
+        f"✍️ <b>Single Tasks System:</b> {'🟢 ON (1 Task at a time)' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited tasks without waiting for review)'}\n"
+        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n\n"
+        f"Select an option below to update:"
+    )
+
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_change_values_inline_keyboard())
+    except Exception:
+        pass
 
 @dp.callback_query(F.data == "admin_change_tasks_rate")
 async def cb_admin_change_tasks_rate(call: CallbackQuery, state: FSMContext):
@@ -4132,7 +4246,7 @@ async def inline_submit_task(call: CallbackQuery, state: FSMContext):
     await call.answer()
     user_id = call.from_user.id
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
+        row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1 AND t.status != \'completed\' ORDER BY ta.assigned_at DESC LIMIT 1', user_id)
     
     if not row:
         await call.answer('❌ You do not have any active task.', show_alert=True)
@@ -4155,7 +4269,7 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
     await state.clear()
     user_id = call.from_user.id
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
+        row = await conn.fetchrow('SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1 AND t.status != \'completed\' ORDER BY ta.assigned_at DESC LIMIT 1', user_id)
         if not row:
             await call.answer("❌ You don't have any active task to cancel.", show_alert=True)
             return
@@ -4166,7 +4280,7 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
 
         task_id = row['task_id']
         async with conn.transaction():
-            await conn.execute('DELETE FROM task_assignments WHERE user_id=$1', user_id)
+            await conn.execute('DELETE FROM task_assignments WHERE user_id=$1 AND task_id=$2', user_id, task_id)
             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
             
     try:
@@ -4178,10 +4292,10 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
 async def handle_task_submission(message: Message, state: FSMContext):
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
-        task = await conn.fetchrow('SELECT t.id, t.title, t.details, t.reward FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1', user_id)
+        task = await conn.fetchrow('SELECT t.id, t.title, t.details, t.reward FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1 AND t.status = \'assigned\' ORDER BY ta.assigned_at DESC LIMIT 1', user_id)
     if not task:
         await state.clear()
-        sent_msg = await message.answer('❌ No active task found.', reply_markup=get_main_menu_keyboard())
+        sent_msg = await message.answer('❌ No active assigned task found to submit.', reply_markup=get_main_menu_keyboard())
         await state.update_data(last_menu_msg_id=sent_msg.message_id)
         return
     
