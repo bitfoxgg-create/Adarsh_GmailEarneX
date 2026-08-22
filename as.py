@@ -4257,10 +4257,7 @@ async def inline_submit_task(call: CallbackQuery, state: FSMContext):
         
     await state.set_state(UserState.submitting_task)
     
-    try:
-        await call.message.edit_reply_markup(reply_markup=None)
-    except:
-        pass
+    # Do not clear buttons so user retains the ability to cancel or resubmit if validation fails
     await call.message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Send screenshot or proof of completed task.', parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "user_cancel_task")
@@ -4315,6 +4312,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
     # Real-Time Verification with MyEmailVerifier/Emailable
     is_valid = await is_gmail_registered(email, user_id=user_id)
     if not is_valid:
+        # Prompt remains active with buttons preserved on the task message
         await message.answer(
             f"❌ <b>This Gmail account (<code>{email}</code>) does not exist on Google!</b>\n\n"
             f"Please create <code>{email}</code> first on Google, then submit your proof again.",
