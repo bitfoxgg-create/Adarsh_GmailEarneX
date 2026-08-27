@@ -4854,4 +4854,33 @@ async def auto_expire_tasks():
 
                 if assigned_u:
                     user_notice = f"⏰ <b>Task Expired:</b>\nYour assigned task #{task_id} (<code>{email_str}</code>) has expired after 23 hours 30 minutes due to lifetime limit reached."
-                    asyncio.create_taskSorry, something went wrong. Please try your request again.
+                    asyncio.create_task(send_user_notification(
+                        assigned_u, 
+                        user_notice, 
+                        reply_markup=get_main_menu_keyboard(), 
+                        parse_mode=ParseMode.HTML
+                    ))
+
+        except Exception as e:
+            print(f"Error in background task: {e}")
+            
+        await asyncio.sleep(60)
+
+# ============================================
+# LONG POLLING INITIALIZER WITH FLASK THREAD
+# ============================================
+
+async def main():
+    await init_db()
+    await load_settings_and_cache()
+    asyncio.create_task(auto_expire_tasks())
+    
+    server_thread = Thread(target=run_flask)
+    server_thread.daemon = True
+    server_thread.start()
+    
+    print('🤖 Bot connected to Supabase PostgreSQL and polling 24/7 on Render...')
+    await dp.start_polling(bot)
+
+if __name__ == '__main__':
+    asyncio.run(main())
