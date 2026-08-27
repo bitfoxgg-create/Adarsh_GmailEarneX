@@ -95,22 +95,19 @@ MENU_BUTTONS = {
 # ============================================
 
 def generate_random_password(length: int = 12) -> str:
-    """Generates a secure, eligible Gmail-compliant random password."""
+    """Generates an alphanumeric random password (only capital letters, small letters, and numbers)."""
     upper = string.ascii_uppercase
     lower = string.ascii_lowercase
     digits = string.digits
-    special = "@#$%&*!"
     
-    # Ensure at least one character from each category
     password = [
         secrets.choice(upper),
         secrets.choice(lower),
-        secrets.choice(digits),
-        secrets.choice(special)
+        secrets.choice(digits)
     ]
     
-    all_chars = upper + lower + digits + special
-    for _ in range(length - 4):
+    all_chars = upper + lower + digits
+    for _ in range(length - 3):
         password.append(secrets.choice(all_chars))
         
     secrets.SystemRandom().shuffle(password)
@@ -133,9 +130,8 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
     if not email.endswith("@gmail.com"):
         return False
 
-    username = email[:-10]  # Strip '@gmail.com'
+    username = email[:-10]
 
-    # 1. Strict Google Account Syntax Validation
     if len(username) < 6 or len(username) > 30:
         return False
 
@@ -145,11 +141,9 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
     if username.startswith('.') or username.endswith('.') or '..' in username:
         return False
 
-    # 2. Check if Validator is globally enabled by admin
     if not VALIDATOR_ENABLED:
         return True
 
-    # Temporary verification message sent to user
     verify_msg = None
     if user_id:
         try:
@@ -161,7 +155,6 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
         except Exception:
             pass
 
-    # 3. Dynamic Multi-Provider Verification
     is_valid_email = False
 
     try:
@@ -186,7 +179,7 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
                             state = lower_data.get("state", "")
                             if state == "deliverable":
                                 is_valid_email = True
-                        else: # myemailverifier
+                        else:
                             status_val = lower_data.get("status") or lower_data.get("addressstatus") or lower_data.get("statuscode") or ""
                             diagnosis_val = lower_data.get("diagnosis", "")
                             if status_val in ["valid", "1", "deliverable", "ok", "true"] or "exists" in diagnosis_val or "active" in diagnosis_val:
@@ -196,7 +189,6 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
     except Exception as e:
         print(f"Validator Exception ({VALIDATOR_PROVIDER}): {e}")
 
-    # Auto-delete the "Verifying..." message to keep chat clean
     if verify_msg:
         try:
             await verify_msg.delete()
@@ -357,9 +349,12 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS task_assignments (
                 task_id INT UNIQUE, 
                 user_id BIGINT, 
-                assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                message_id BIGINT DEFAULT NULL
             )
         ''')
+        await conn.execute("ALTER TABLE task_assignments ADD COLUMN IF NOT EXISTS message_id BIGINT DEFAULT NULL")
+
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS pending_sells (
                 id SERIAL PRIMARY KEY,
@@ -681,27 +676,21 @@ def get_settings_keyboard(notif_enabled: bool, currency: str):
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
     
-    # 1st Row: Add Task & All Tasks Dashboard
     kb.button(text="➕ Add Task", style="success")
     kb.button(text="📋 Tasks", style="primary")
     
-    # 2nd Row: Available Tasks & Pending Reviews
     kb.button(text="🟢 Available Tasks", style="primary")
     kb.button(text="📥 Pending Reviews", style="primary")
     
-    # 3rd Row: Pending Withdrawals & Chat
     kb.button(text="💸 Pending Withdrawals", style="primary")
     kb.button(text="💬 Chat", style="primary")
     
-    # 4th Row: Unassign Tasks & Cancel Sell
     kb.button(text="🗑 Unassign Tasks", style="danger")
     kb.button(text="🚫 Cancel Sell", style="danger")
     
-    # 5th Row: Cancel Task & Find ID
     kb.button(text="🚫 Cancel Task", style="danger")
     kb.button(text="🔍 Find ID", style="primary")
     
-    # Rest of the menu rows
     kb.button(text="➕ Add Balance", style="success")
     kb.button(text="➖ Cut Balance", style="danger")
     kb.button(text="🔎 Check Balance", style="primary")
@@ -721,7 +710,6 @@ def get_admin_menu_keyboard():
     ref_btn_text = "🟢 Ref Status: ON" if REF_STATUS else "🔴 Ref Status: OFF"
     kb.button(text=ref_btn_text, style="success" if REF_STATUS else "danger")
     
-    # Validator & Ultra Status row
     kb.button(text="⚙️ Validator", style="primary")
     ultra_btn_text = "🟢 Ultra Status: ON" if ULTRA_STATUS else "🔴 Ultra Status: OFF"
     kb.button(text=ultra_btn_text, style="success" if ULTRA_STATUS else "danger")
@@ -1778,8 +1766,10 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
                     )
                     try:
                         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+                        await conn.execute("UPDATE task_assignments SET message_id=$1 WHERE task_id=$2", call.message.message_id, task_id)
                     except:
-                        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+                        new_m = await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+                        await conn.execute("UPDATE task_assignments SET message_id=$1 WHERE task_id=$2", new_m.message_id, task_id)
                     await state.update_data(last_menu_msg_id=call.message.message_id)
                     return
                 else:
@@ -1802,14 +1792,12 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
         details = task['details']
         reward = task['reward']
 
-        # Extract Gmail username from details or title
         try:
             parts = details.split(" | ")
             username = parts[0].replace("Email: ", "").strip()
         except:
             username = title.replace("Login to ", "").strip()
 
-        # Dynamic Password System: Fixed Default vs Random Generated Password
         if DEFAULT_TASK_PASS_STATUS:
             password = DEFAULT_TASK_PASS
         else:
@@ -1819,7 +1807,7 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
         
         async with conn.transaction():
             await conn.execute("UPDATE tasks SET status='assigned', details=$1 WHERE id=$2", new_details, task_id)
-            await conn.execute('INSERT INTO task_assignments(task_id, user_id) VALUES ($1, $2)', task_id, user_id)
+            await conn.execute('INSERT INTO task_assignments(task_id, user_id, message_id) VALUES ($1, $2, $3)', task_id, user_id, call.message.message_id)
 
     reward_str = format_currency(reward, user_curr)
     txt = (
@@ -1830,8 +1818,12 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
     )
     try:
         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE task_assignments SET message_id=$1 WHERE task_id=$2", call.message.message_id, task_id)
     except:
-        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+        new_m = await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE task_assignments SET message_id=$1 WHERE task_id=$2", new_m.message_id, task_id)
     await state.update_data(last_menu_msg_id=call.message.message_id)
 
 @dp.callback_query(F.data == "menu_balance")
@@ -1902,7 +1894,6 @@ async def process_sell_username(message: Message, state: FSMContext):
 
     search_pattern = f"%{username.lower()}%"
 
-    # FIRST: Check database to save API credits
     async with db_pool.acquire() as conn:
         existing_sell = await conn.fetchval(
             "SELECT id FROM pending_sells WHERE LOWER(details) LIKE $1",
@@ -1922,7 +1913,6 @@ async def process_sell_username(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # SECOND: Perform Real-Time Verification via API only if not in database
     is_valid = await is_gmail_registered(username, user_id=message.from_user.id)
     if not is_valid:
         await message.answer(
@@ -3209,7 +3199,7 @@ async def start_unassign_all_users(call: CallbackQuery, state: FSMContext):
 
     async with db_pool.acquire() as conn:
         active_assignments = await conn.fetch('''
-            SELECT ta.task_id, ta.user_id 
+            SELECT ta.task_id, ta.user_id, ta.message_id, t.title, t.details
             FROM task_assignments ta
             JOIN tasks t ON ta.task_id = t.id
             WHERE t.status != 'pending_review'
@@ -3223,22 +3213,40 @@ async def start_unassign_all_users(call: CallbackQuery, state: FSMContext):
             return
 
         task_ids = [r['task_id'] for r in active_assignments]
-        user_ids = [r['user_id'] for r in active_assignments]
 
         async with conn.transaction():
             await conn.execute("DELETE FROM task_assignments WHERE task_id = ANY($1::int[])", task_ids)
-            await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids)
+            for r in active_assignments:
+                tid = r['task_id']
+                if DEFAULT_TASK_PASS_STATUS:
+                    try:
+                        email_clean = r['details'].split(" | ")[0].replace("Email: ", "").strip()
+                    except Exception:
+                        email_clean = r['title'].replace("Login to ", "").strip()
+                    reset_details = f"Email: {email_clean} | Pass: {DEFAULT_TASK_PASS}"
+                    await conn.execute("UPDATE tasks SET status='available', details=$1 WHERE id=$2", reset_details, tid)
+                else:
+                    await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", tid)
 
     count = len(task_ids)
     try:
-        await call.message.edit_text(f"✅ <b>Successfully unassigned {count} active task(s) from all users and returned them to the available pool.</b>", parse_mode=ParseMode.HTML)
+        await call.message.edit_text(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML)
     except Exception:
-        await call.message.answer(f"✅ <b>Successfully unassigned {count} active task(s) from all users and returned them to the available pool.</b>", parse_mode=ParseMode.HTML)
+        await call.message.answer(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML)
 
-    for uid in set(user_ids):
+    for r in active_assignments:
+        uid = r['user_id']
+        mid = r['message_id']
+        if mid:
+            try:
+                await bot.delete_message(chat_id=uid, message_id=mid)
+            except Exception:
+                pass
+
         asyncio.create_task(send_user_notification(
             uid,
-            '⚠️ <b>Your active task has been unassigned by the admin and returned to the pool.</b>',
+            '⚠️ <b>Your active task has been unassigned by the admin and returned to the pool.</b>\n\nChoose an option from the menu below:',
+            reply_markup=get_main_menu_keyboard(),
             parse_mode=ParseMode.HTML
         ))
 
@@ -3247,18 +3255,46 @@ async def process_unassign_user_id_step(message: Message, state: FSMContext):
     try:
         target_id = int(message.text.strip())
         async with db_pool.acquire() as conn:
-            assigned = await conn.fetchrow("SELECT task_id FROM task_assignments WHERE user_id=$1", target_id)
+            assigned = await conn.fetchrow('''
+                SELECT ta.task_id, ta.message_id, t.title, t.details 
+                FROM task_assignments ta
+                JOIN tasks t ON ta.task_id = t.id
+                WHERE ta.user_id=$1
+            ''', target_id)
             if not assigned:
                 await message.answer(f"📭 User `{target_id}` does not have any active task assigned.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
                 await state.clear()
                 return
 
             task_id = assigned['task_id']
+            task_msg_id = assigned['message_id']
+
             async with conn.transaction():
                 await conn.execute("DELETE FROM task_assignments WHERE user_id=$1", target_id)
-                await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
+                if DEFAULT_TASK_PASS_STATUS:
+                    try:
+                        email_clean = assigned['details'].split(" | ")[0].replace("Email: ", "").strip()
+                    except Exception:
+                        email_clean = assigned['title'].replace("Login to ", "").strip()
+                    reset_details = f"Email: {email_clean} | Pass: {DEFAULT_TASK_PASS}"
+                    await conn.execute("UPDATE tasks SET status='available', details=$1 WHERE id=$2", reset_details, task_id)
+                else:
+                    await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
 
-        await message.answer(f"✅ **Successfully unassigned Task #{task_id} from User `{target_id}` and returned it to pool.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        if task_msg_id:
+            try:
+                await bot.delete_message(chat_id=target_id, message_id=task_msg_id)
+            except Exception:
+                pass
+
+        await message.answer(f"✅ **Successfully unassigned Task #{task_id} from User `{target_id}`, removed task message, and returned it to pool.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        
+        asyncio.create_task(send_user_notification(
+            target_id,
+            '⚠️ <b>Your active task has been unassigned by the admin and returned to the pool.</b>\n\nChoose an option from the menu below:',
+            reply_markup=get_main_menu_keyboard(),
+            parse_mode=ParseMode.HTML
+        ))
     except ValueError:
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
@@ -4267,7 +4303,6 @@ async def inline_withdraw_ultra_handler(call: CallbackQuery):
 
     payout_amount = bal - ULTRA_FEES
 
-    # Instant API payout execution via Ultra Gateway
     url = f"https://ultra-pay.store/APIs/api?token={urllib.parse.quote(ULTRA_TOKEN)}&key={urllib.parse.quote(ULTRA_KEY)}&paytoNumber={urllib.parse.quote(ultra_num)}&amount={payout_amount:.2f}&comment=iGmail Pay"
 
     await call.answer("⚡ Processing instant payment via Ultra Gateway...", show_alert=False)
@@ -4343,8 +4378,6 @@ async def inline_submit_task(call: CallbackQuery, state: FSMContext):
         return
         
     await state.set_state(UserState.submitting_task)
-    
-    # Do not clear buttons so user retains the ability to cancel or resubmit if validation fails
     await call.message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Send screenshot or proof of completed task.', parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "user_cancel_task")
@@ -4396,10 +4429,8 @@ async def handle_task_submission(message: Message, state: FSMContext):
         email = title.replace("Login to ", "").strip()
         password = DEFAULT_TASK_PASS
 
-    # Real-Time Verification with MyEmailVerifier/Emailable
     is_valid = await is_gmail_registered(email, user_id=user_id)
     if not is_valid:
-        # Prompt remains active with buttons preserved on the task message
         await message.answer(
             f"❌ <b>This Gmail account (<code>{email}</code>) does not exist on Google!</b>\n\n"
             f"Please create <code>{email}</code> first on Google, then submit your proof again.",
@@ -4754,7 +4785,6 @@ async def reject_withdraw(call: CallbackQuery):
 async def auto_expire_tasks():
     while True:
         try:
-            # 1. Check for 30-minute user assignment expiry (release back to pool)
             expired_30m = []
             async with db_pool.acquire() as conn:
                 rows_30m = await conn.fetch('''
@@ -4783,7 +4813,6 @@ async def auto_expire_tasks():
                     parse_mode=ParseMode.HTML
                 ))
 
-            # 2. Check for 23h 30m Global Task Lifetime Expiry (whether assigned, available, or in pool)
             expired_lifetime_tasks = []
             async with db_pool.acquire() as conn:
                 rows_lifetime = await conn.fetch('''
@@ -4809,7 +4838,6 @@ async def auto_expire_tasks():
                         await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', expired_ids)
                         await conn.execute('DELETE FROM tasks WHERE id = ANY($1::int[])', expired_ids)
 
-            # Send lifetime expiration notifications to admin and affected assigned users
             for item in expired_lifetime_tasks:
                 task_id = item['id']
                 assigned_u = item['user_id']
@@ -4818,43 +4846,12 @@ async def auto_expire_tasks():
                 except Exception:
                     email_str = f"Task #{task_id}"
 
-                # Admin Notification
                 admin_notice = f"⏰ <b>Task Expiry Alert:</b>\nTask #{task_id} (<code>{email_str}</code>) expired after 23h 30m and was automatically removed."
                 try:
                     await bot.send_message(ADMIN_ID, admin_notice, parse_mode=ParseMode.HTML)
                 except Exception:
                     pass
 
-                # Assigned User Notification
                 if assigned_u:
                     user_notice = f"⏰ <b>Task Expired:</b>\nYour assigned task #{task_id} (<code>{email_str}</code>) has expired after 23 hours 30 minutes due to lifetime limit reached."
-                    asyncio.create_task(send_user_notification(
-                        assigned_u, 
-                        user_notice, 
-                        reply_markup=get_main_menu_keyboard(), 
-                        parse_mode=ParseMode.HTML
-                    ))
-
-        except Exception as e:
-            print(f"Error in background task: {e}")
-            
-        await asyncio.sleep(60)
-
-# ============================================
-# LONG POLLING INITIALIZER WITH FLASK THREAD
-# ============================================
-
-async def main():
-    await init_db()
-    await load_settings_and_cache()
-    asyncio.create_task(auto_expire_tasks())
-    
-    server_thread = Thread(target=run_flask)
-    server_thread.daemon = True
-    server_thread.start()
-    
-    print('🤖 Bot connected to Supabase PostgreSQL and polling 24/7 on Render...')
-    await dp.start_polling(bot)
-
-if __name__ == '__main__':
-    asyncio.run(main())
+                    asyncio.create_taskSorry, something went wrong. Please try your request again.
