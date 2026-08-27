@@ -52,7 +52,7 @@ REF_STATUS = True           # True = ON, False = OFF (Silent Referral Disabling)
 ULTRA_STATUS = True         # True = ON, False = OFF
 SINGLE_TASK_STATUS = True   # True = 1/1 task (must wait for review), False = Unlimited tasks concurrently
 SELL_GMAIL_STATUS = True    # True = Enabled, False = Disabled
-DEFAULT_PASS_STATUS = True  # True = Fixed Default Password, False = Dynamic Random Password
+DEFAULT_TASK_PASS_STATUS = True  # True = Fixed Default Password, False = Random Generated Password
 
 # GLOBAL DYNAMIC RATES & DEFAULTS
 DEFAULT_TASK_RATE = 50.0
@@ -91,16 +91,30 @@ MENU_BUTTONS = {
 }
 
 # ============================================
-# DYNAMIC PASSWORD GENERATOR
+# HELPER FOR RANDOM PASSWORD GENERATION
 # ============================================
 
 def generate_random_password(length: int = 12) -> str:
-    """Generates a secure, Google-compliant password containing uppercase, lowercase, and digits."""
-    chars = string.ascii_letters + string.digits
-    while True:
-        pwd = ''.join(secrets.choice(chars) for _ in range(length))
-        if any(c.islower() for c in pwd) and any(c.isupper() for c in pwd) and any(c.isdigit() for c in pwd):
-            return pwd
+    """Generates a secure, eligible Gmail-compliant random password."""
+    upper = string.ascii_uppercase
+    lower = string.ascii_lowercase
+    digits = string.digits
+    special = "@#$%&*!"
+    
+    # Ensure at least one character from each category
+    password = [
+        secrets.choice(upper),
+        secrets.choice(lower),
+        secrets.choice(digits),
+        secrets.choice(special)
+    ]
+    
+    all_chars = upper + lower + digits + special
+    for _ in range(length - 4):
+        password.append(secrets.choice(all_chars))
+        
+    secrets.SystemRandom().shuffle(password)
+    return ''.join(password)
 
 # ============================================
 # DYNAMIC GMAIL VALIDATOR ENGINE
@@ -364,8 +378,8 @@ async def init_db():
         ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, DEFAULT_PASS_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
-    global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS, UPI_FEES, USDT_FEES, ULTRA_FEES, ULTRA_TOKEN, ULTRA_KEY
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
+    global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS, DEFAULT_TASK_PASS_STATUS, UPI_FEES, USDT_FEES, ULTRA_FEES, ULTRA_TOKEN, ULTRA_KEY
     
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id FROM banned_users")
@@ -389,8 +403,8 @@ async def load_settings_and_cache():
         sell_gmail_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='sell_gmail_status'")
         SELL_GMAIL_STATUS = (sell_gmail_val != 'off')
 
-        def_pass_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='default_pass_status'")
-        DEFAULT_PASS_STATUS = (def_pass_val != 'off')
+        task_pass_stat = await conn.fetchval("SELECT value FROM bot_settings WHERE key='default_task_pass_status'")
+        DEFAULT_TASK_PASS_STATUS = (task_pass_stat != 'off')
 
         key_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='emailable_api_key'")
         if key_val:
@@ -801,6 +815,15 @@ def get_change_values_inline_keyboard():
         icon_custom_emoji_id="6005570495603282482",
         style="primary"
     )
+    
+    pass_mode_text = f"4b. Password Mode: {'🟢 Fixed (Default)' if DEFAULT_TASK_PASS_STATUS else '🔴 Random'}"
+    kb.button(
+        text=pass_mode_text,
+        callback_data="admin_toggle_task_pass_mode",
+        icon_custom_emoji_id="6005570495603282482",
+        style="success" if DEFAULT_TASK_PASS_STATUS else "danger"
+    )
+
     kb.button(
         text="5. Change Fees",
         callback_data="admin_change_fees",
@@ -828,14 +851,6 @@ def get_change_values_inline_keyboard():
         callback_data="admin_toggle_sell_gmail",
         icon_custom_emoji_id="5377548235709619284",
         style="success" if SELL_GMAIL_STATUS else "danger"
-    )
-
-    default_pass_btn_text = f"9. Default Pass: {'🟢 ON (Fixed)' if DEFAULT_PASS_STATUS else '🔴 OFF (Random)'}"
-    kb.button(
-        text=default_pass_btn_text,
-        callback_data="admin_toggle_default_pass",
-        icon_custom_emoji_id="6005570495603282482",
-        style="success" if DEFAULT_PASS_STATUS else "danger"
     )
 
     kb.adjust(1, 1, 1, 1, 1, 1, 1, 1, 1)
@@ -1787,25 +1802,24 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
         details = task['details']
         reward = task['reward']
 
+        # Extract Gmail username from details or title
         try:
             parts = details.split(" | ")
             username = parts[0].replace("Email: ", "").strip()
-            password = parts[1].replace("Pass: ", "").strip()
         except:
             username = title.replace("Login to ", "").strip()
-            password = DEFAULT_TASK_PASS
 
-        # Dynamic password rotation if Random Password mode is enabled (DEFAULT_PASS_STATUS == False)
-        if not DEFAULT_PASS_STATUS:
-            password = generate_random_password()
-            details = f"Email: {username} | Pass: {password}"
-            async with conn.transaction():
-                await conn.execute("UPDATE tasks SET status='assigned', details=$1 WHERE id=$2", details, task_id)
-                await conn.execute('INSERT INTO task_assignments(task_id, user_id) VALUES ($1, $2)', task_id, user_id)
+        # Dynamic Password System: Fixed Default vs Random Generated Password
+        if DEFAULT_TASK_PASS_STATUS:
+            password = DEFAULT_TASK_PASS
         else:
-            async with conn.transaction():
-                await conn.execute("UPDATE tasks SET status='assigned' WHERE id=$1", task_id)
-                await conn.execute('INSERT INTO task_assignments(task_id, user_id) VALUES ($1, $2)', task_id, user_id)
+            password = generate_random_password(12)
+
+        new_details = f"Email: {username} | Pass: {password}"
+        
+        async with conn.transaction():
+            await conn.execute("UPDATE tasks SET status='assigned', details=$1 WHERE id=$2", new_details, task_id)
+            await conn.execute('INSERT INTO task_assignments(task_id, user_id) VALUES ($1, $2)', task_id, user_id)
 
     reward_str = format_currency(reward, user_curr)
     txt = (
@@ -2868,7 +2882,7 @@ async def process_chat_user_id_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid User ID. Please enter a valid numeric Telegram User ID.", reply_markup=get_admin_menu_keyboard())
         await state.clear()
 
-@dp.message(AdminState.waiting_for_chat_message, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS))
+@dp.message(AdminState.waiting_for_chat_message, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS) if F.text else True)
 async def process_chat_message_step(message: Message, state: FSMContext):
     data = await state.get_data()
     target_user_id = data.get('chat_target_user_id')
@@ -3610,14 +3624,50 @@ async def admin_btn_change_values(message: Message, state: FSMContext):
         f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
         f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
         f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
+        f"🔒 <b>Password Mode:</b> {'🟢 Fixed Default Password' if DEFAULT_TASK_PASS_STATUS else '🔴 Random Generated Password'}\n"
         f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
         f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
         f"✍️ <b>Single Tasks System:</b> {'🟢 ON (1 Task at a time)' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited tasks without waiting for review)'}\n"
-        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n"
-        f"🔑 <b>Default Password Mode:</b> {'🟢 Fixed Default Pass' if DEFAULT_PASS_STATUS else '🔴 Dynamic Random Pass'}\n\n"
+        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n\n"
         f"Select an option below to update:"
     )
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_change_values_inline_keyboard())
+
+@dp.callback_query(F.data == "admin_toggle_task_pass_mode")
+async def cb_admin_toggle_task_pass_mode(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    global DEFAULT_TASK_PASS_STATUS
+    DEFAULT_TASK_PASS_STATUS = not DEFAULT_TASK_PASS_STATUS
+    new_val = 'on' if DEFAULT_TASK_PASS_STATUS else 'off'
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('default_task_pass_status', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
+
+    await call.answer(f"Task Password Mode is now {'Fixed (Default)' if DEFAULT_TASK_PASS_STATUS else 'Random Password'}!", show_alert=True)
+    
+    task_usd = DEFAULT_TASK_RATE / USD_TO_INR
+    sell_usd = GMAIL_SELL_RATE / USD_TO_INR
+    min_w_usd = MIN_WITHDRAWAL_AMT / USD_TO_INR
+
+    text = (
+        f"⚙️ <b>Change System Rates & Limits</b>\n\n"
+        f"📝 <b>Current Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} (${task_usd:.2f})\n"
+        f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
+        f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
+        f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
+        f"🔒 <b>Password Mode:</b> {'🟢 Fixed Default Password' if DEFAULT_TASK_PASS_STATUS else '🔴 Random Generated Password'}\n"
+        f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
+        f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
+        f"✍️ <b>Single Tasks System:</b> {'🟢 ON (1 Task at a time)' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited tasks without waiting for review)'}\n"
+        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n\n"
+        f"Select an option below to update:"
+    )
+
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_change_values_inline_keyboard())
+    except Exception:
+        pass
 
 @dp.callback_query(F.data == "admin_toggle_single_task")
 async def cb_admin_toggle_single_task(call: CallbackQuery):
@@ -3642,11 +3692,11 @@ async def cb_admin_toggle_single_task(call: CallbackQuery):
         f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
         f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
         f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
+        f"🔒 <b>Password Mode:</b> {'🟢 Fixed Default Password' if DEFAULT_TASK_PASS_STATUS else '🔴 Random Generated Password'}\n"
         f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
         f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
         f"✍️ <b>Single Tasks System:</b> {'🟢 ON (1 Task at a time)' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited tasks without waiting for review)'}\n"
-        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n"
-        f"🔑 <b>Default Password Mode:</b> {'🟢 Fixed Default Pass' if DEFAULT_PASS_STATUS else '🔴 Dynamic Random Pass'}\n\n"
+        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n\n"
         f"Select an option below to update:"
     )
 
@@ -3678,48 +3728,11 @@ async def cb_admin_toggle_sell_gmail(call: CallbackQuery):
         f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
         f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
         f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
+        f"🔒 <b>Password Mode:</b> {'🟢 Fixed Default Password' if DEFAULT_TASK_PASS_STATUS else '🔴 Random Generated Password'}\n"
         f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
         f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
         f"✍️ <b>Single Tasks System:</b> {'🟢 ON (1 Task at a time)' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited tasks without waiting for review)'}\n"
-        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n"
-        f"🔑 <b>Default Password Mode:</b> {'🟢 Fixed Default Pass' if DEFAULT_PASS_STATUS else '🔴 Dynamic Random Pass'}\n\n"
-        f"Select an option below to update:"
-    )
-
-    try:
-        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_change_values_inline_keyboard())
-    except Exception:
-        pass
-
-@dp.callback_query(F.data == "admin_toggle_default_pass")
-async def cb_admin_toggle_default_pass(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
-        return
-    global DEFAULT_PASS_STATUS
-    DEFAULT_PASS_STATUS = not DEFAULT_PASS_STATUS
-    new_val = 'on' if DEFAULT_PASS_STATUS else 'off'
-
-    async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('default_pass_status', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
-
-    mode_text = "Fixed Default Password" if DEFAULT_PASS_STATUS else "Dynamic Random Passwords"
-    await call.answer(f"Password Mode changed to {mode_text}!", show_alert=True)
-    
-    task_usd = DEFAULT_TASK_RATE / USD_TO_INR
-    sell_usd = GMAIL_SELL_RATE / USD_TO_INR
-    min_w_usd = MIN_WITHDRAWAL_AMT / USD_TO_INR
-
-    text = (
-        f"⚙️ <b>Change System Rates & Limits</b>\n\n"
-        f"📝 <b>Current Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} (${task_usd:.2f})\n"
-        f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
-        f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
-        f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
-        f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
-        f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
-        f"✍️ <b>Single Tasks System:</b> {'🟢 ON (1 Task at a time)' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited tasks without waiting for review)'}\n"
-        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n"
-        f"🔑 <b>Default Password Mode:</b> {'🟢 Fixed Default Pass' if DEFAULT_PASS_STATUS else '🔴 Dynamic Random Pass'}\n\n"
+        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n\n"
         f"Select an option below to update:"
     )
 
@@ -4331,7 +4344,7 @@ async def inline_submit_task(call: CallbackQuery, state: FSMContext):
         
     await state.set_state(UserState.submitting_task)
     
-    # Notice: buttons are preserved on the task message so the user can re-submit/cancel cleanly if needed
+    # Do not clear buttons so user retains the ability to cancel or resubmit if validation fails
     await call.message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Send screenshot or proof of completed task.', parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "user_cancel_task")
@@ -4783,4 +4796,65 @@ async def auto_expire_tasks():
                 now = datetime.utcnow()
                 for r in rows_lifetime:
                     created_at = r['created_at'] or now
-                    if now -I'm having a hard time fulfilling your request. Can I help you with something else instead?
+                    if now - created_at > timedelta(hours=23, minutes=30):
+                        expired_lifetime_tasks.append({
+                            'id': r['id'],
+                            'details': r['details'],
+                            'user_id': r['user_id']
+                        })
+
+                if expired_lifetime_tasks:
+                    expired_ids = [t['id'] for t in expired_lifetime_tasks]
+                    async with conn.transaction():
+                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', expired_ids)
+                        await conn.execute('DELETE FROM tasks WHERE id = ANY($1::int[])', expired_ids)
+
+            # Send lifetime expiration notifications to admin and affected assigned users
+            for item in expired_lifetime_tasks:
+                task_id = item['id']
+                assigned_u = item['user_id']
+                try:
+                    email_str = item['details'].split(" | ")[0].replace("Email: ", "").strip()
+                except Exception:
+                    email_str = f"Task #{task_id}"
+
+                # Admin Notification
+                admin_notice = f"⏰ <b>Task Expiry Alert:</b>\nTask #{task_id} (<code>{email_str}</code>) expired after 23h 30m and was automatically removed."
+                try:
+                    await bot.send_message(ADMIN_ID, admin_notice, parse_mode=ParseMode.HTML)
+                except Exception:
+                    pass
+
+                # Assigned User Notification
+                if assigned_u:
+                    user_notice = f"⏰ <b>Task Expired:</b>\nYour assigned task #{task_id} (<code>{email_str}</code>) has expired after 23 hours 30 minutes due to lifetime limit reached."
+                    asyncio.create_task(send_user_notification(
+                        assigned_u, 
+                        user_notice, 
+                        reply_markup=get_main_menu_keyboard(), 
+                        parse_mode=ParseMode.HTML
+                    ))
+
+        except Exception as e:
+            print(f"Error in background task: {e}")
+            
+        await asyncio.sleep(60)
+
+# ============================================
+# LONG POLLING INITIALIZER WITH FLASK THREAD
+# ============================================
+
+async def main():
+    await init_db()
+    await load_settings_and_cache()
+    asyncio.create_task(auto_expire_tasks())
+    
+    server_thread = Thread(target=run_flask)
+    server_thread.daemon = True
+    server_thread.start()
+    
+    print('🤖 Bot connected to Supabase PostgreSQL and polling 24/7 on Render...')
+    await dp.start_polling(bot)
+
+if __name__ == '__main__':
+    asyncio.run(main())
