@@ -355,6 +355,17 @@ async def init_db():
         ''')
         await conn.execute("ALTER TABLE task_assignments ADD COLUMN IF NOT EXISTS message_id BIGINT DEFAULT NULL")
 
+        # History log table for past task assignments
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS task_history (
+                id SERIAL PRIMARY KEY,
+                task_id INT,
+                user_id BIGINT,
+                password_used TEXT,
+                assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS pending_sells (
                 id SERIAL PRIMARY KEY,
@@ -1808,6 +1819,7 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
         async with conn.transaction():
             await conn.execute("UPDATE tasks SET status='assigned', details=$1 WHERE id=$2", new_details, task_id)
             await conn.execute('INSERT INTO task_assignments(task_id, user_id, message_id) VALUES ($1, $2, $3)', task_id, user_id, call.message.message_id)
+            await conn.execute('INSERT INTO task_history(task_id, user_id, password_used) VALUES ($1, $2, $3)', task_id, user_id, password)
 
     reward_str = format_currency(reward, user_curr)
     txt = (
@@ -2872,7 +2884,7 @@ async def process_chat_user_id_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid User ID. Please enter a valid numeric Telegram User ID.", reply_markup=get_admin_menu_keyboard())
         await state.clear()
 
-@dp.message(AdminState.waiting_for_chat_message, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS) if F.text else True)
+@dp.message(AdminState.waiting_for_chat_message, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS))
 async def process_chat_message_step(message: Message, state: FSMContext):
     data = await state.get_data()
     target_user_id = data.get('chat_target_user_id')
@@ -3306,7 +3318,7 @@ async def admin_btn_find_id(message: Message, state: FSMContext):
     await state.set_state(AdminState.waiting_for_find_id_query)
     await message.answer(
         "🔍 <b>Find Task & User ID</b>\n\n"
-        "Please send the Gmail username (e.g., <code>jhon</code> without @gmail.com):",
+        "Please send the Gmail username or address (e.g., <code>john</code> or <code>john@gmail.com</code>):",
         parse_mode=ParseMode.HTML
     )
 
@@ -3321,36 +3333,129 @@ async def process_find_id_query_step(message: Message, state: FSMContext):
             search_pattern
         )
         sell_match = await conn.fetchrow(
-            "SELECT id, user_id, details, status FROM pending_sells WHERE LOWER(details) LIKE $1 LIMIT 1",
+            "SELECT id, user_id, details, status, amount FROM pending_sells WHERE LOWER(details) LIKE $1 LIMIT 1",
             search_pattern
         )
 
     if not task_match and not sell_match:
-        await message.answer(f"📭 No records found matching <code>{query}</code>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+        await message.answer(f"📭 <b>No records found matching:</b> <code>{query}</code>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
         await state.clear()
         return
 
-    text = f"🔍 <b>SearchResults for:</b> <code>{query}</code>\n\n"
+    text = f"🔍 <b>Search Results for:</b> <code>{query}</code>\n━━━━━━━━━━━━━━━━━━━━\n\n"
+    
+    target_task_id = None
     if task_match:
-        assigned_u = task_match['user_id'] or 'Not Assigned'
+        target_task_id = task_match['id']
+        assigned_u = task_match['user_id']
+        if assigned_u:
+            try:
+                chat_info = await bot.get_chat(assigned_u)
+                u_name = f"@{chat_info.username}" if chat_info.username else f"User {assigned_u}"
+            except Exception:
+                u_name = f"User {assigned_u}"
+            assigned_str = f"{u_name} (<code>{assigned_u}</code>)"
+        else:
+            assigned_str = "<i>None (Unassigned)</i>"
+
+        status_emoji = {
+            'available': '🟢',
+            'assigned': '🔵',
+            'pending_review': '🟡',
+            'completed': '✅'
+        }.get(task_match['status'], '⚪️')
+
         text += (
-            f"📋 <b>Task Record:</b>\n"
-            f"• <b>Task ID:</b> <code>#{task_match['id']}</code>\n"
-            f"• <b>Status:</b> <code>{task_match['status']}</code>\n"
-            f"• <b>Assigned User ID:</b> <code>{assigned_u}</code>\n"
-            f"• <b>Details:</b> <code>{task_match['details']}</code>\n\n"
+            f"📋 <b>Task Record</b>\n"
+            f"• 🆔 <b>Task ID:</b> <code>#{task_match['id']}</code>\n"
+            f"• 📌 <b>Status:</b> {status_emoji} <b>{task_match['status'].upper()}</b>\n"
+            f"• 👤 <b>Assigned User:</b> {assigned_str}\n"
+            f"• 📝 <b>Details:</b> <code>{task_match['details']}</code>\n\n"
         )
+        
     if sell_match:
+        seller_id = sell_match['user_id']
+        try:
+            chat_info = await bot.get_chat(seller_id)
+            s_name = f"@{chat_info.username}" if chat_info.username else f"User {seller_id}"
+        except Exception:
+            s_name = f"User {seller_id}"
+
+        status_emoji = {
+            'pending_review': '🟡',
+            'approved': '🟢',
+            'declined': '🔴'
+        }.get(sell_match['status'], '⚪️')
+
         text += (
-            f"📦 <b>Sell Request Record:</b>\n"
-            f"• <b>Sell ID:</b> <code>#{sell_match['id']}</code>\n"
-            f"• <b>Status:</b> <code>{sell_match['status']}</code>\n"
-            f"• <b>Seller User ID:</b> <code>{sell_match['user_id']}</code>\n"
-            f"• <b>Details:</b> <code>{sell_match['details']}</code>\n"
+            f"📦 <b>Sell Request Record</b>\n"
+            f"• 🆔 <b>Sell ID:</b> <code>#{sell_match['id']}</code>\n"
+            f"• 📌 <b>Status:</b> {status_emoji} <b>{sell_match['status'].upper()}</b>\n"
+            f"• 👤 <b>Seller:</b> {s_name} (<code>{seller_id}</code>)\n"
+            f"• 💰 <b>Amount:</b> ₹{sell_match['amount']:.2f}\n"
+            f"• 📝 <b>Details:</b>\n<code>{sell_match['details']}</code>\n"
         )
 
-    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+    kb = InlineKeyboardBuilder()
+    if target_task_id:
+        kb.button(
+            text="ViewPast",
+            callback_data=f"view_past_task:{target_task_id}",
+            icon_custom_emoji_id="5870458774455587120",
+            style="success"
+        )
+    
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb.as_markup() if target_task_id else None)
     await state.clear()
+
+@dp.callback_query(F.data.startswith("view_past_task:"))
+async def cb_view_past_task(call: CallbackQuery):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    task_id = int(call.data.split(":")[1])
+
+    async with db_pool.acquire() as conn:
+        history_records = await conn.fetch('''
+            SELECT user_id, password_used, assigned_at 
+            FROM task_history 
+            WHERE task_id = $1 
+            ORDER BY id DESC
+        ''', task_id)
+
+    if not history_records:
+        await call.message.answer(
+            f"📭 <b>No past assignment history recorded for Task #{task_id}.</b>",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    history_text = (
+        f"📜 <b>Past Assignment History for Task #{task_id}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+
+    for idx, row in enumerate(history_records, start=1):
+        u_id = row['user_id']
+        pwd = row['password_used']
+        dt_str = row['assigned_at'].strftime("%b %d, %Y %I:%M %p")
+
+        try:
+            user_obj = await bot.get_chat(u_id)
+            user_display = f"@{user_obj.username}" if user_obj.username else f"User {u_id}"
+        except Exception:
+            user_display = f"User {u_id}"
+
+        history_text += (
+            f"<b>{idx}. Assigned Entry:</b>\n"
+            f"• 👤 <b>User:</b> {user_display} (<code>{u_id}</code>)\n"
+            f"• 🔑 <b>Password:</b> <code>{pwd}</code>\n"
+            f"• 📅 <b>Assigned At:</b> {dt_str}\n"
+            f"────────────────────\n"
+        )
+
+    await call.message.answer(history_text, parse_mode=ParseMode.HTML)
 
 @dp.message(F.text == "➕ Add Balance", StateFilter("*"))
 async def admin_btn_add_balance(message: Message, state: FSMContext):
@@ -4884,3 +4989,4 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
