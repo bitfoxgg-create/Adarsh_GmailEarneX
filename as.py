@@ -506,15 +506,14 @@ async def ensure_user(user_id: int, referrer_id: int = None, conn=None) -> bool:
     return is_new
 
 async def get_user_data(user_id: int):
-    if user_id in USER_CACHE:
-        return USER_CACHE[user_id]
-        
+    """Fetches real-time user data directly from the database without stale cache."""
     await ensure_user(user_id)
     async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT balance, upi, usdt_address, ultra_number, notifications_enabled, currency, referred_by, referral_earnings FROM users WHERE user_id=$1", user_id)
-        if row:
-            USER_CACHE[user_id] = dict(row)
-        return row
+        row = await conn.fetchrow(
+            "SELECT balance, upi, usdt_address, ultra_number, notifications_enabled, currency, referred_by, referral_earnings FROM users WHERE user_id=$1", 
+            user_id
+        )
+        return dict(row) if row else None
 
 async def get_balance(user_id: int) -> float:
     data = await get_user_data(user_id)
