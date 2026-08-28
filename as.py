@@ -125,6 +125,10 @@ def get_provider_url() -> str:
 
 async def is_gmail_registered(email: str, user_id: int = None) -> bool:
     """Verifies Gmail account existence with auto-cleanup of verification notice."""
+    # 1. If validator is disabled by admin, accept all accounts immediately
+    if not VALIDATOR_ENABLED:
+        return True
+
     email = email.strip().lower()
     
     if not email.endswith("@gmail.com"):
@@ -140,9 +144,6 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
 
     if username.startswith('.') or username.endswith('.') or '..' in username:
         return False
-
-    if not VALIDATOR_ENABLED:
-        return True
 
     verify_msg = None
     if user_id:
