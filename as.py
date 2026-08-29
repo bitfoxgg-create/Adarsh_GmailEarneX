@@ -2219,20 +2219,24 @@ async def open_admin_panel(message: Message, state: FSMContext):
         reply_markup=get_admin_menu_keyboard()
     )
 
-@dp.message(F.text.in_({"🔴 Bot Status: OFF", "🟢 Bot Status: ON"}), StateFilter("*"))
-async def admin_btn_toggle_status(message: Message, state: FSMContext):
+@dp.message(F.text.in_({"🔴 Worker: OFF", "🟢 Worker: ON"}), StateFilter("*"))
+async def admin_btn_toggle_worker_status(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
-    global BOT_STATUS
-    BOT_STATUS = not BOT_STATUS
-    new_val = 'on' if BOT_STATUS else 'off'
+    await state.clear()
+    global WORKER_STATUS
+    WORKER_STATUS = not WORKER_STATUS
+    new_val = 'on' if WORKER_STATUS else 'off'
 
     async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('bot_status', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
+        await conn.execute(
+            "INSERT INTO bot_settings (key, value) VALUES ('worker_status', $1) ON CONFLICT (key) DO UPDATE SET value = $1", 
+            new_val
+        )
 
-    status_str = "🟢 <b>Bot is now ONLINE and ENABLED for all users!</b>" if BOT_STATUS else "🔴 <b>Bot is now OFF and DISABLED for normal users!</b>"
+    status_str = "🟢 <b>Worker Bot is now ENABLED!</b>" if WORKER_STATUS else "🔴 <b>Worker Bot is now DISABLED!</b> (Workers cannot add tasks, review, or broadcast)"
     await message.answer(status_str, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
-
+    
 @dp.message(F.text.in_({"🔴 Ref Status: OFF", "🟢 Ref Status: ON"}), StateFilter("*"))
 async def admin_btn_toggle_ref_status(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
