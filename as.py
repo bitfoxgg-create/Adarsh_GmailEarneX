@@ -53,6 +53,7 @@ ULTRA_STATUS = True         # True = ON, False = OFF
 SINGLE_TASK_STATUS = True   # True = 1/1 task (must wait for review), False = Unlimited tasks concurrently
 SELL_GMAIL_STATUS = True    # True = Enabled, False = Disabled
 DEFAULT_TASK_PASS_STATUS = True  # True = Fixed Default Password, False = Random Generated Password
+WORKER_STATUS = True   # True = ON, False = OFF
 
 # GLOBAL DYNAMIC RATES & DEFAULTS
 DEFAULT_TASK_RATE = 50.0
@@ -87,7 +88,7 @@ MENU_BUTTONS = {
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "⚙️ Change Values", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "⚙️ Validator", "👑 Transfer Admin",
-    "🟢 Ultra Status: ON", "🔴 Ultra Status: OFF"
+    "🟢 Ultra Status: ON", "🔴 Ultra Status: OFF", "🟢 Worker: ON", "🔴 Worker: OFF"
 }
 
 # ============================================
@@ -385,7 +386,7 @@ async def init_db():
         ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, WORKER_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
     global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS, DEFAULT_TASK_PASS_STATUS, UPI_FEES, USDT_FEES, ULTRA_FEES, ULTRA_TOKEN, ULTRA_KEY
     
     async with db_pool.acquire() as conn:
@@ -403,6 +404,10 @@ async def load_settings_and_cache():
 
         ultra_stat = await conn.fetchval("SELECT value FROM bot_settings WHERE key='ultra_status'")
         ULTRA_STATUS = (ultra_stat != 'off')
+
+        # Load worker bot status from DB
+        worker_stat = await conn.fetchval("SELECT value FROM bot_settings WHERE key='worker_status'")
+        WORKER_STATUS = (worker_stat != 'off')
 
         single_task_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='single_task_status'")
         SINGLE_TASK_STATUS = (single_task_val != 'off')
@@ -725,10 +730,13 @@ def get_admin_menu_keyboard():
     ultra_btn_text = "🟢 Ultra Status: ON" if ULTRA_STATUS else "🔴 Ultra Status: OFF"
     kb.button(text=ultra_btn_text, style="success" if ULTRA_STATUS else "danger")
 
+    worker_btn_text = "🟢 Worker: ON" if WORKER_STATUS else "🔴 Worker: OFF"
+    kb.button(text=worker_btn_text, style="success" if WORKER_STATUS else "danger")
     kb.button(text="👑 Transfer Admin", style="danger")
+
     kb.button(text="🏠 Main Menu", style="primary")
     
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_cancel_sell_options_keyboard():
