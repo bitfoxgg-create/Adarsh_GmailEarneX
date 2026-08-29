@@ -4514,7 +4514,15 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
 async def handle_task_submission(message: Message, state: FSMContext):
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
-        task = await conn.fetchrow('SELECT t.id, t.title, t.details, t.reward FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1 AND t.status = \'assigned\' ORDER BY ta.assigned_at DESC LIMIT 1', user_id)
+        task = await conn.fetchrow('''
+            SELECT t.id, t.title, t.details, t.reward, t.added_by 
+            FROM task_assignments ta 
+            JOIN tasks t ON ta.task_id = t.id 
+            WHERE ta.user_id=$1 AND t.status = 'assigned' 
+            ORDER BY ta.assigned_at DESC 
+            LIMIT 1
+        ''', user_id)
+
     if not task:
         await state.clear()
         sent_msg = await message.answer('❌ No active assigned task found to submit.', reply_markup=get_main_menu_keyboard())
@@ -4525,6 +4533,7 @@ async def handle_task_submission(message: Message, state: FSMContext):
     title = task['title']
     details = task['details']
     reward = task['reward']
+    added_by_worker = task.get('added_by')
 
     try:
         parts = details.split(" | ")
@@ -4546,27 +4555,60 @@ async def handle_task_submission(message: Message, state: FSMContext):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
+    # 1. Admin Review Card (Sent via Primary Bot)
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text='Approve', callback_data=f'ta:{task_id}', icon_custom_emoji_id="6217663806110175239", style="success"),
         InlineKeyboardButton(text='Decline', callback_data=f'td:{task_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
     ]])
 
     admin_msg_text = (
         f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>Task Submission #{task_id}</b>\n\n'
-        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>User:</b> @{message.from_user.username} (<code>{user_id}</code>)\n'
-        f'📧 <b>Email:</b> <code>{email}</code>\n'
-        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
+        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>User:</b> @{message.from_user.username} (<code>{user_id}</code>)\n\n'
+        f'📧 <b>Email:</b>\n<code>{email}</code>\n\n'
+        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b>\n<code>{password}</code>\n\n'
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}'
     )
 
     if message.photo:
-        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_msg_text, reply_markup=kb, parse_mode=ParseMode.HTML)
+        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_msg_text, reply_markup=admin_kb, parse_mode=ParseMode.HTML)
     else:
         proof_text = f"\n\nProof: {message.text}"
-        await bot.send_message(ADMIN_ID, admin_msg_text + proof_text, reply_markup=kb, parse_mode=ParseMode.HTML)
-    
+        await bot.send_message(ADMIN_ID, admin_msg_text + proof_text, reply_markup=admin_kb, parse_mode=ParseMode.HTML)
+
+    # 2. Worker Review Card (Sent to Worker Bot ONLY if task was added by that worker)
+    if added_by_worker and str(added_by_worker) != str(ADMIN_ID):
+        worker_bot_token = os.environ.get("WORKER_BOT_TOKEN")
+        if worker_bot_token:
+            async def send_worker_alert():
+                try:
+                    w_bot = Bot(token=worker_bot_token)
+                    worker_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="✅ Approve", callback_data=f"w_ta:{task_id}"),
+                        InlineKeyboardButton(text="❌ Decline", callback_data=f"w_td:{task_id}")
+                    ]])
+                    worker_msg_text = (
+                        f"📤 <b>New Task Submission #{task_id}</b>\n\n"
+                        f"📧 <b>Email:</b>\n<code>{email}</code>\n\n"
+                        f"🔑 <b>Password:</b>\n<code>{password}</code>"
+                    )
+                    
+                    if message.photo:
+                        photo_id = message.photo[-1].file_id
+                        if message.caption:
+                            worker_msg_text += f"\n\n📝 <b>Proof:</b> {message.caption}"
+                        await w_bot.send_photo(added_by_worker, photo=photo_id, caption=worker_msg_text, reply_markup=worker_kb, parse_mode=ParseMode.HTML)
+                    else:
+                        worker_msg_text += f"\n\n📝 <b>Proof:</b> {message.text}"
+                        await w_bot.send_message(added_by_worker, worker_msg_text, reply_markup=worker_kb, parse_mode=ParseMode.HTML)
+                    
+                    await w_bot.session.close()
+                except Exception as err:
+                    print(f"Error sending worker real-time submission alert: {err}")
+
+            asyncio.create_task(send_worker_alert())
+
     sent_msg = await message.answer(
-        f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Task #{task_id} submission sent for admin review.\n\n'
+        f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Task #{task_id} submission sent for review.\n\n'
         f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
         reply_markup=get_main_menu_keyboard(), 
         parse_mode=ParseMode.HTML
