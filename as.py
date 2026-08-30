@@ -373,9 +373,12 @@ async def init_db():
                 details TEXT,
                 amount DOUBLE PRECISION DEFAULT 30.0,
                 status TEXT DEFAULT 'pending_review',
+                claimed_by BIGINT DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        await conn.execute("ALTER TABLE pending_sells ADD COLUMN IF NOT EXISTS claimed_by BIGINT DEFAULT NULL")
+        
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS bot_settings (
                 key TEXT PRIMARY KEY,
@@ -1994,7 +1997,7 @@ async def process_sell_password(message: Message, state: FSMContext):
         parse_mode=ParseMode.HTML
     )
 
-    # Broadcast real-time sell alert to all authorized workers
+    # Broadcast real-time stock alert to all authorized workers
     async def alert_authorized_workers():
         if not WORKER_BOT_TOKEN:
             return
@@ -2004,20 +2007,16 @@ async def process_sell_password(message: Message, state: FSMContext):
                 active_workers = await conn.fetch(
                     "SELECT worker_id FROM worker_permissions WHERE is_active = TRUE AND can_sell_gmail = TRUE AND is_deleted = FALSE"
                 )
+                current_stock = await conn.fetchval("SELECT COUNT(*) FROM pending_sells WHERE status = 'pending_review' AND claimed_by IS NULL") or 0
             
-            w_kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="✅ Approve", callback_data=f"w_sa:{sell_id}"),
-                InlineKeyboardButton(text="❌ Decline", callback_data=f"w_sd:{sell_id}")
-            ]])
             w_msg = (
-                f"📨 <b>New Gmail Sell Request #{sell_id}</b>\n\n"
-                f"📧 <b>Username:</b> <code>{username}</code>\n"
-                f"🔑 <b>Password:</b> <code>{password}</code>\n"
-                f"💰 <b>Payout Rate:</b> ₹{rate:.2f}"
+                f'<tg-emoji emoji-id="5377548235709619284">📦</tg-emoji> <b>New Gmail Sell Request Stock!</b>\n\n'
+                f'📊 <b>Available Stock:</b> <code>{current_stock}</code>\n\n'
+                f'Go to <b>Pending Reviews</b> to claim review tasks.'
             )
             for w in active_workers:
                 try:
-                    await w_bot.send_message(w['worker_id'], w_msg, reply_markup=w_kb, parse_mode=ParseMode.HTML)
+                    await w_bot.send_message(w['worker_id'], w_msg, parse_mode=ParseMode.HTML)
                 except Exception:
                     pass
             await w_bot.session.close()
@@ -3039,7 +3038,7 @@ async def cb_admin_view_pending_sells(call: CallbackQuery):
 
     async with db_pool.acquire() as conn:
         sell_rows = await conn.fetch('''
-            SELECT id, user_id, details, amount 
+            SELECT id, user_id, details, amount, claimed_by 
             FROM pending_sells 
             WHERE status = 'pending_review'
             ORDER BY created_at ASC
@@ -3059,6 +3058,7 @@ async def cb_admin_view_pending_sells(call: CallbackQuery):
         user_id = r['user_id']
         details = r['details']
         amount = r['amount']
+        claimed_by = r['claimed_by']
 
         try:
             lines = details.split("\n")
@@ -3072,6 +3072,8 @@ async def cb_admin_view_pending_sells(call: CallbackQuery):
         except Exception:
             formatted_details = f"<code>{details}</code>"
 
+        claimed_str = f"\n👷 <b>Claimed By Worker:</b> <code>{claimed_by}</code>" if claimed_by else "\n📦 <b>Status:</b> 🟢 Unclaimed Stock"
+
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="Approve", callback_data=f"sa:{sell_id}", icon_custom_emoji_id="6217663806110175239", style="success"),
             InlineKeyboardButton(text="Decline", callback_data=f"sd:{sell_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
@@ -3080,7 +3082,8 @@ async def cb_admin_view_pending_sells(call: CallbackQuery):
         await call.message.answer(
             f'<tg-emoji emoji-id="5377548235709619284">📦</tg-emoji> <b>Pending Gmail Sell Request #{sell_id}</b>\n\n'
             f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>User ID:</b> <code>{user_id}</code>\n'
-            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Rate:</b> ₹{amount:.2f}\n\n'
+            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Rate:</b> ₹{amount:.2f}'
+            f'{claimed_str}\n\n'
             f'📝 <b>Details:</b>\n{formatted_details}',
             reply_markup=kb,
             parse_mode=ParseMode.HTML
@@ -3148,9 +3151,9 @@ async def admin_btn_pending_withdrawals(message: Message, state: FSMContext):
     await state.clear()
 
     async with db_pool.acquire() as conn:
-        upi_count = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending' AND method = 'UPI'") or 0
-        usdt_count = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending' AND method = 'USDT BEP-20'") or 0
-        ultra_count = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending' AND method = 'Ultra Gateway'") or 0
+        upi_count = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending' AND method ILIKE '%UPI%'") or 0
+        usdt_count = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending' AND method ILIKE '%USDT%'") or 0
+        ultra_count = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending' AND method ILIKE '%Ultra%'") or 0
 
     total_pending = upi_count + usdt_count + ultra_count
 
@@ -3180,34 +3183,43 @@ async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
 
-    method_key = call.data.replace("admin_view_pending_withdraw_", "")
-    target_method = "UPI" if method_key == "upi" else ("USDT BEP-20" if method_key == "usdt" else "Ultra Gateway")
+    method_key = call.data.replace("admin_view_pending_withdraw_", "").strip().lower()
+
+    if method_key == "upi":
+        target_pattern = "%UPI%"
+        display_label = "UPI"
+    elif method_key == "usdt":
+        target_pattern = "%USDT%"
+        display_label = "USDT BEP-20"
+    else:
+        target_pattern = "%Ultra%"
+        display_label = "Ultra Gateway"
 
     async with db_pool.acquire() as conn:
         withdraw_rows = await conn.fetch('''
             SELECT id, user_id, amount, method, payment_address, created_at
             FROM withdrawals
-            WHERE status = 'pending' AND method = $1
+            WHERE status = 'pending' AND method ILIKE $1
             ORDER BY created_at ASC
-        ''', target_method)
+        ''', target_pattern)
 
     if not withdraw_rows:
         try:
-            await call.message.edit_text(f"📭 <b>No pending withdrawal requests for {target_method}!</b>", parse_mode=ParseMode.HTML)
+            await call.message.edit_text(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML)
         except Exception:
-            await call.message.answer(f"📭 <b>No pending withdrawal requests for {target_method}!</b>", parse_mode=ParseMode.HTML)
+            await call.message.answer(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML)
         return
 
-    await call.message.answer(f"💸 <b>Displaying {len(withdraw_rows)} pending withdrawal request(s) for {target_method}:</b>", parse_mode=ParseMode.HTML)
+    await call.message.answer(f"💸 <b>Displaying {len(withdraw_rows)} pending withdrawal request(s) for {display_label}:</b>", parse_mode=ParseMode.HTML)
 
     for r in withdraw_rows:
         withdraw_id = r['id']
         user_id = r['user_id']
         amount = r['amount']
-        method = r['method'] or 'UPI'
+        method = r['method'] or display_label
         payment_address = r['payment_address'] or 'None'
         
-        extra_usdt_info = f" (~${(amount / USD_TO_INR):.2f} USDT)" if method == "USDT BEP-20" else ""
+        extra_usdt_info = f" (~${(amount / USD_TO_INR):.2f} USDT)" if "usdt" in method.lower() else ""
 
         kb = InlineKeyboardBuilder()
         kb.button(
@@ -3222,8 +3234,9 @@ async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
             icon_custom_emoji_id="5274099962655816924", 
             style="danger"
         )
+        kb.adjust(2)
 
-        address_emoji = '<tg-emoji emoji-id="6152069549442208798">🏦</tg-emoji>' if method == 'UPI' else ('<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji>' if method == 'USDT BEP-20' else '<tg-emoji emoji-id="5195033767969839232">⚡️</tg-emoji>')
+        address_emoji = '<tg-emoji emoji-id="6152069549442208798">🏦</tg-emoji>' if "upi" in method.lower() else ('<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji>' if "usdt" in method.lower() else '<tg-emoji emoji-id="5195033767969839232">⚡️</tg-emoji>')
 
         await call.message.answer(
             f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
@@ -3232,7 +3245,7 @@ async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
             f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Amount:</b> ₹{amount:.2f}{extra_usdt_info}\n'
             f'{address_emoji} <b>Address:</b> <code>{payment_address}</code>\n'
             f'📅 <b>Date:</b> {r["created_at"].strftime("%Y-%m-%d %H:%M:%S")}',
-            reply_markup=kb,
+            reply_markup=kb.as_markup(),
             parse_mode=ParseMode.HTML
         )
 
@@ -4656,6 +4669,7 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
         icon_custom_emoji_id="5274099962655816924",
         style="danger"
     )
+    kb.adjust(2)
     
     await bot.send_message(
         ADMIN_ID,
@@ -4739,6 +4753,7 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
         icon_custom_emoji_id="5274099962655816924",
         style="danger"
     )
+    kb.adjust(2)
     
     usdt_amount = payout_amount / USD_TO_INR
     await bot.send_message(
