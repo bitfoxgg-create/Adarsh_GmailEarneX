@@ -387,9 +387,14 @@ async def init_db():
                 worker_id BIGINT PRIMARY KEY,
                 name TEXT DEFAULT 'Worker',
                 is_active BOOLEAN DEFAULT TRUE,
-                can_sell_gmail BOOLEAN DEFAULT FALSE
+                can_sell_gmail BOOLEAN DEFAULT FALSE,
+                is_deleted BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        await conn.execute("ALTER TABLE worker_permissions ADD COLUMN IF NOT EXISTS name TEXT DEFAULT 'Worker'")
+        await conn.execute("ALTER TABLE worker_permissions ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE")
+        await conn.execute("ALTER TABLE worker_permissions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
 
 async def load_settings_and_cache():
     global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
@@ -1997,7 +2002,7 @@ async def process_sell_password(message: Message, state: FSMContext):
             w_bot = Bot(token=WORKER_BOT_TOKEN)
             async with db_pool.acquire() as conn:
                 active_workers = await conn.fetch(
-                    "SELECT worker_id FROM worker_permissions WHERE is_active = TRUE AND can_sell_gmail = TRUE"
+                    "SELECT worker_id FROM worker_permissions WHERE is_active = TRUE AND can_sell_gmail = TRUE AND is_deleted = FALSE"
                 )
             
             w_kb = InlineKeyboardMarkup(inline_keyboard=[[
@@ -2339,10 +2344,10 @@ async def process_setting_ultra(message: Message, state: FSMContext):
 
 async def render_workers_list_text_and_kb():
     async with db_pool.acquire() as conn:
-        workers = await conn.fetch("SELECT worker_id, name, is_active, can_sell_gmail FROM worker_permissions ORDER BY worker_id ASC")
+        workers = await conn.fetch("SELECT worker_id, name, is_active, can_sell_gmail FROM worker_permissions WHERE is_deleted = FALSE ORDER BY created_at ASC, worker_id ASC")
 
     if not workers:
-        text = "👷 <b>Manage Workers</b>\n\n📭 No workers registered in database yet.\n<i>(Workers register automatically when they start their bot instances).</i>"
+        text = "👷 <b>Manage Workers</b>\n\n📭 No active workers registered in database yet."
         kb = InlineKeyboardBuilder()
         return text, kb.as_markup()
 
@@ -2352,7 +2357,8 @@ async def render_workers_list_text_and_kb():
     for idx, w in enumerate(workers, start=1):
         status_icon = "🟢" if w['is_active'] else "🔴"
         sell_icon = "📨" if w['can_sell_gmail'] else "🚫"
-        btn_label = f"#{idx} Worker ({w['worker_id']}) {status_icon}{sell_icon}"
+        worker_display_name = w['name'] if w['name'] else f"Worker ({w['worker_id']})"
+        btn_label = f"#{idx} {worker_display_name} {status_icon}{sell_icon}"
         kb.button(text=btn_label, callback_data=f"adm_work_view:{w['worker_id']}")
 
     kb.adjust(1)
@@ -2446,6 +2452,133 @@ async def cb_admin_toggle_worker_sell(call: CallbackQuery):
     status_msg = "ENABLED" if new_state else "DISABLED"
     await call.answer(f"Worker {worker_id} Sell Gmail is now {status_msg}!", show_alert=True)
     await cb_admin_view_worker(call)
+
+# ============================================
+# HIDDEN ADMIN WORKER COMMANDS (/name, /delete, /recover)
+# ============================================
+
+@dp.message(Command("name"))
+async def admin_cmd_set_worker_name(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    args = (command.args or "").strip()
+    if not args:
+        await message.answer("⚠️ <b>Usage:</b> <code>/name #1 Karim</code>", parse_mode=ParseMode.HTML)
+        return
+
+    parts = args.split(maxsplit=1)
+    target_tag = parts[0]
+    new_name = parts[1] if len(parts) > 1 else ""
+
+    if not new_name:
+        await message.answer("⚠️ Please provide a name. <i>Example:</i> <code>/name #1 Karim</code>", parse_mode=ParseMode.HTML)
+        return
+
+    index_match = re.search(r'\d+', target_tag)
+    if not index_match:
+        await message.answer("❌ Invalid format. Use <code>/name #1 NewName</code>", parse_mode=ParseMode.HTML)
+        return
+
+    target_index = int(index_match.group(0))
+
+    async with db_pool.acquire() as conn:
+        active_workers = await conn.fetch("SELECT worker_id, name FROM worker_permissions WHERE is_deleted = FALSE ORDER BY created_at ASC, worker_id ASC")
+        
+        if target_index < 1 or target_index > len(active_workers):
+            await message.answer(f"❌ Worker <b>#{target_index}</b> not found. Active count: {len(active_workers)}", parse_mode=ParseMode.HTML)
+            return
+
+        target_worker = active_workers[target_index - 1]
+        target_worker_id = target_worker['worker_id']
+
+        await conn.execute("UPDATE worker_permissions SET name=$1 WHERE worker_id=$2", new_name, target_worker_id)
+
+    await message.answer(f"✅ <b>Worker #{target_index} (ID: <code>{target_worker_id}</code>) name updated to:</b> <code>{new_name}</code>", parse_mode=ParseMode.HTML)
+
+@dp.message(Command("delete"))
+async def admin_cmd_delete_worker(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    args = (command.args or "").strip()
+    if not args:
+        await message.answer("⚠️ <b>Usage:</b> <code>/delete #1</code>", parse_mode=ParseMode.HTML)
+        return
+
+    index_match = re.search(r'\d+', args)
+    if not index_match:
+        await message.answer("❌ Invalid format. Use <code>/delete #1</code>", parse_mode=ParseMode.HTML)
+        return
+
+    target_index = int(index_match.group(0))
+
+    async with db_pool.acquire() as conn:
+        active_workers = await conn.fetch("SELECT worker_id, name FROM worker_permissions WHERE is_deleted = FALSE ORDER BY created_at ASC, worker_id ASC")
+
+        if target_index < 1 or target_index > len(active_workers):
+            await message.answer(f"❌ Worker <b>#{target_index}</b> not found. Active count: {len(active_workers)}", parse_mode=ParseMode.HTML)
+            return
+
+        target_worker = active_workers[target_index - 1]
+        target_worker_id = target_worker['worker_id']
+
+        # Complete off (is_active=FALSE) and mark as deleted
+        await conn.execute("UPDATE worker_permissions SET is_active = FALSE, is_deleted = TRUE WHERE worker_id = $1", target_worker_id)
+
+    await message.answer(
+        f"🗑 <b>Worker #{target_index} (ID: <code>{target_worker_id}</code>) is now OFF and deleted from Manage Workers!</b>\n"
+        f"All subsequent worker IDs have been shifted down automatically.\n\n"
+        f"<i>To recover this worker later, use:</i> <code>/recover #-{target_index}</code>",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(Command("recover"))
+async def admin_cmd_recover_worker(message: Message, command: CommandObject):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    args = (command.args or "").strip()
+    if not args:
+        await message.answer("⚠️ <b>Usage:</b> <code>/recover #-1</code>", parse_mode=ParseMode.HTML)
+        return
+
+    index_match = re.search(r'\d+', args)
+    if not index_match:
+        await message.answer("❌ Invalid format. Use <code>/recover #-1</code>", parse_mode=ParseMode.HTML)
+        return
+
+    target_index = int(index_match.group(0))
+
+    async with db_pool.acquire() as conn:
+        deleted_workers = await conn.fetch("SELECT worker_id, name FROM worker_permissions WHERE is_deleted = TRUE ORDER BY created_at ASC, worker_id ASC")
+
+        if not deleted_workers:
+            await message.answer("📭 No deleted workers available to recover.", parse_mode=ParseMode.HTML)
+            return
+
+        if target_index < 1 or target_index > len(deleted_workers):
+            await message.answer(f"❌ Deleted worker record with index #{target_index} not found. (Total deleted: {len(deleted_workers)})", parse_mode=ParseMode.HTML)
+            return
+
+        target_worker = deleted_workers[target_index - 1]
+        target_worker_id = target_worker['worker_id']
+
+        # Restore worker, set is_active=TRUE, is_deleted=FALSE, and refresh created_at so it takes the latest free index
+        await conn.execute(
+            "UPDATE worker_permissions SET is_active = TRUE, is_deleted = FALSE, created_at = CURRENT_TIMESTAMP WHERE worker_id = $1",
+            target_worker_id
+        )
+        
+        active_count = await conn.fetchval("SELECT COUNT(*) FROM worker_permissions WHERE is_deleted = FALSE")
+
+    await message.answer(
+        f"✅ <b>Worker recovered successfully!</b>\n\n"
+        f"🆔 <b>Worker ID:</b> <code>{target_worker_id}</code>\n"
+        f"🏷 <b>Assigned Index:</b> <b>#{active_count}</b> (Latest Free ID)\n"
+        f"⚡️ <b>Status:</b> 🟢 Active & Restored to Manage Workers",
+        parse_mode=ParseMode.HTML
+    )
 
 # ============================================
 # ADMIN PANEL COMMAND & BUTTON HANDLERS
@@ -3076,20 +3209,19 @@ async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
         
         extra_usdt_info = f" (~${(amount / USD_TO_INR):.2f} USDT)" if method == "USDT BEP-20" else ""
 
-        kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(
-                text="Pay", 
-                callback_data=f"wp:{withdraw_id}", 
-                icon_custom_emoji_id="5444856076954520455", 
-                style="success"
-            ),
-            InlineKeyboardButton(
-                text="Reject", 
-                callback_data=f"wr:{withdraw_id}", 
-                icon_custom_emoji_id="5274099962655816924", 
-                style="danger"
-            )
-        ]])
+        kb = InlineKeyboardBuilder()
+        kb.button(
+            text="Pay", 
+            callback_data=f"wp:{withdraw_id}", 
+            icon_custom_emoji_id="5444856076954520455", 
+            style="success"
+        )
+        kb.button(
+            text="Reject", 
+            callback_data=f"wr:{withdraw_id}", 
+            icon_custom_emoji_id="5274099962655816924", 
+            style="danger"
+        )
 
         address_emoji = '<tg-emoji emoji-id="6152069549442208798">🏦</tg-emoji>' if method == 'UPI' else ('<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji>' if method == 'USDT BEP-20' else '<tg-emoji emoji-id="5195033767969839232">⚡️</tg-emoji>')
 
