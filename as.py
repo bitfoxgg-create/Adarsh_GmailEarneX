@@ -36,6 +36,7 @@ from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 8856827908))
 DATABASE_URL = os.environ.get('DATABASE_URL')
+WORKER_BOT_TOKEN = os.environ.get('WORKER_BOT_TOKEN', '').strip()
 
 # Currency Conversion Rate (1 USD/USDT = 96.30 INR)
 USD_TO_INR = 96.30
@@ -54,7 +55,6 @@ ULTRA_STATUS = True         # True = ON, False = OFF
 SINGLE_TASK_STATUS = True   # True = 1/1 task (must wait for review), False = Unlimited tasks concurrently
 SELL_GMAIL_STATUS = True    # True = Enabled, False = Disabled
 DEFAULT_TASK_PASS_STATUS = True  # True = Fixed Default Password, False = Random Generated Password
-WORKER_STATUS = True   # True = ON, False = OFF
 
 # GLOBAL DYNAMIC RATES & DEFAULTS
 DEFAULT_TASK_RATE = 50.0
@@ -89,7 +89,7 @@ MENU_BUTTONS = {
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "⚙️ Change Values", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "⚙️ Validator", "👑 Transfer Admin",
-    "🟢 Ultra Status: ON", "🔴 Ultra Status: OFF", "🟢 Worker: ON", "🔴 Worker: OFF"
+    "🟢 Ultra Status: ON", "🔴 Ultra Status: OFF", "👷 Manage Workers"
 }
 
 # ============================================
@@ -97,7 +97,6 @@ MENU_BUTTONS = {
 # ============================================
 
 def generate_random_password(length: int = 12) -> str:
-    """Generates an alphanumeric random password (only capital letters, small letters, and numbers)."""
     upper = string.ascii_uppercase
     lower = string.ascii_lowercase
     digits = string.digits
@@ -120,13 +119,11 @@ def generate_random_password(length: int = 12) -> str:
 # ============================================
 
 def get_provider_url() -> str:
-    """Returns the API endpoint format string for the current provider."""
     if VALIDATOR_PROVIDER == "emailable":
         return "https://api.emailable.com/v1/verify?email={email}&api_key={key}"
     return "https://api.myemailverifier.com/api/validate_single.php?apikey={key}&email={email}"
 
 async def is_gmail_registered(email: str, user_id: int = None) -> bool:
-    """Verifies Gmail account existence with auto-cleanup of verification notice."""
     if not VALIDATOR_ENABLED:
         return True
 
@@ -342,10 +339,12 @@ async def init_db():
                 details TEXT, 
                 reward DOUBLE PRECISION, 
                 status TEXT DEFAULT 'available',
+                added_by BIGINT DEFAULT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        await conn.execute("ALTER TABLE tasks ADD COLUMN IF NOT EXISTS added_by BIGINT DEFAULT NULL")
 
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS task_assignments (
@@ -383,9 +382,17 @@ async def init_db():
                 value TEXT
             )
         ''')
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS worker_permissions (
+                worker_id BIGINT PRIMARY KEY,
+                name TEXT DEFAULT 'Worker',
+                is_active BOOLEAN DEFAULT TRUE,
+                can_sell_gmail BOOLEAN DEFAULT FALSE
+            )
+        ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, WORKER_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
     global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS, DEFAULT_TASK_PASS_STATUS, UPI_FEES, USDT_FEES, ULTRA_FEES, ULTRA_TOKEN, ULTRA_KEY
     
     async with db_pool.acquire() as conn:
@@ -403,9 +410,6 @@ async def load_settings_and_cache():
 
         ultra_stat = await conn.fetchval("SELECT value FROM bot_settings WHERE key='ultra_status'")
         ULTRA_STATUS = (ultra_stat != 'off')
-
-        worker_stat = await conn.fetchval("SELECT value FROM bot_settings WHERE key='worker_status'")
-        WORKER_STATUS = (worker_stat != 'off')
 
         single_task_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='single_task_status'")
         SINGLE_TASK_STATUS = (single_task_val != 'off')
@@ -517,10 +521,6 @@ async def get_user_data(user_id: int):
             user_id
         )
         return dict(row) if row else None
-
-async def get_balance(user_id: int) -> float:
-    data = await get_user_data(user_id)
-    return data['balance'] if data else 0.0
 
 async def is_banned(user_id: int) -> bool:
     return user_id in BANNED_USERS_CACHE
@@ -727,8 +727,7 @@ def get_admin_menu_keyboard():
     ultra_btn_text = "🟢 Ultra Status: ON" if ULTRA_STATUS else "🔴 Ultra Status: OFF"
     kb.button(text=ultra_btn_text, style="success" if ULTRA_STATUS else "danger")
 
-    worker_btn_text = "🟢 Worker: ON" if WORKER_STATUS else "🔴 Worker: OFF"
-    kb.button(text=worker_btn_text, style="success" if WORKER_STATUS else "danger")
+    kb.button(text="👷 Manage Workers", style="primary")
     kb.button(text="👑 Transfer Admin", style="danger")
 
     kb.button(text="🏠 Main Menu", style="primary")
@@ -1001,7 +1000,7 @@ async def edit_admin_message(call: CallbackQuery, additional_text: str):
         print(f"Error editing admin message: {e}")
 
 # ============================================
-# PAGINATED ALL TASKS DASHBOARD FOR ADMIN ('📋 Tasks')
+# PAGINATED ALL TASKS DASHBOARD FOR ADMIN
 # ============================================
 
 async def render_admin_all_tasks_page(page: int = 1):
@@ -1090,7 +1089,7 @@ async def render_admin_all_tasks_page(page: int = 1):
     return text, kb.as_markup()
 
 # ============================================
-# PAGINATED AVAILABLE TASKS DASHBOARD FOR ADMIN ('🟢 Available Tasks')
+# PAGINATED AVAILABLE TASKS DASHBOARD
 # ============================================
 
 async def render_admin_tasks_page(page: int = 1):
@@ -1990,6 +1989,38 @@ async def process_sell_password(message: Message, state: FSMContext):
         parse_mode=ParseMode.HTML
     )
 
+    # Broadcast real-time sell alert to all authorized workers
+    async def alert_authorized_workers():
+        if not WORKER_BOT_TOKEN:
+            return
+        try:
+            w_bot = Bot(token=WORKER_BOT_TOKEN)
+            async with db_pool.acquire() as conn:
+                active_workers = await conn.fetch(
+                    "SELECT worker_id FROM worker_permissions WHERE is_active = TRUE AND can_sell_gmail = TRUE"
+                )
+            
+            w_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="✅ Approve", callback_data=f"w_sa:{sell_id}"),
+                InlineKeyboardButton(text="❌ Decline", callback_data=f"w_sd:{sell_id}")
+            ]])
+            w_msg = (
+                f"📨 <b>New Gmail Sell Request #{sell_id}</b>\n\n"
+                f"📧 <b>Username:</b> <code>{username}</code>\n"
+                f"🔑 <b>Password:</b> <code>{password}</code>\n"
+                f"💰 <b>Payout Rate:</b> ₹{rate:.2f}"
+            )
+            for w in active_workers:
+                try:
+                    await w_bot.send_message(w['worker_id'], w_msg, reply_markup=w_kb, parse_mode=ParseMode.HTML)
+                except Exception:
+                    pass
+            await w_bot.session.close()
+        except Exception as e:
+            print(f"Error alerting workers of sell request: {e}")
+
+    asyncio.create_task(alert_authorized_workers())
+
     sent_msg = await message.answer(
         f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your Gmail sell account details (Request #{sell_id}) have been sent for admin review.\n\n'
         f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
@@ -2303,6 +2334,120 @@ async def process_setting_ultra(message: Message, state: FSMContext):
     await state.clear()
 
 # ============================================
+# MULTI-WORKER MANAGEMENT SYSTEM
+# ============================================
+
+async def render_workers_list_text_and_kb():
+    async with db_pool.acquire() as conn:
+        workers = await conn.fetch("SELECT worker_id, name, is_active, can_sell_gmail FROM worker_permissions ORDER BY worker_id ASC")
+
+    if not workers:
+        text = "👷 <b>Manage Workers</b>\n\n📭 No workers registered in database yet.\n<i>(Workers register automatically when they start their bot instances).</i>"
+        kb = InlineKeyboardBuilder()
+        return text, kb.as_markup()
+
+    text = f"👷 <b>Manage Workers ({len(workers)} Registered)</b>\n\nSelect a worker below to manage full permissions:\n"
+    kb = InlineKeyboardBuilder()
+
+    for idx, w in enumerate(workers, start=1):
+        status_icon = "🟢" if w['is_active'] else "🔴"
+        sell_icon = "📨" if w['can_sell_gmail'] else "🚫"
+        btn_label = f"#{idx} Worker ({w['worker_id']}) {status_icon}{sell_icon}"
+        kb.button(text=btn_label, callback_data=f"adm_work_view:{w['worker_id']}")
+
+    kb.adjust(1)
+    return text, kb.as_markup()
+
+@dp.message(F.text == "👷 Manage Workers", StateFilter("*"))
+async def admin_btn_manage_workers(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    text, reply_markup = await render_workers_list_text_and_kb()
+    await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+
+@dp.callback_query(F.data == "adm_work_back")
+async def cb_admin_workers_back(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+    text, reply_markup = await render_workers_list_text_and_kb()
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+    except Exception:
+        pass
+
+@dp.callback_query(F.data.startswith("adm_work_view:"))
+async def cb_admin_view_worker(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+    worker_id = int(call.data.split(":")[1])
+
+    async with db_pool.acquire() as conn:
+        w = await conn.fetchrow("SELECT worker_id, name, is_active, can_sell_gmail FROM worker_permissions WHERE worker_id=$1", worker_id)
+
+    if not w:
+        await call.message.edit_text("❌ Worker not found in database.", reply_markup=None)
+        return
+
+    status_str = "🟢 ACTIVE (ON)" if w['is_active'] else "🔴 DISABLED (OFF)"
+    sell_str = "🟢 ENABLED (Can review sell & get alerts)" if w['can_sell_gmail'] else "🔴 DISABLED (Sell hidden)"
+
+    text = (
+        f"👷 <b>Worker Control Panel</b>\n\n"
+        f"🆔 <b>Worker ID:</b> <code>{w['worker_id']}</code>\n"
+        f"🏷 <b>Name:</b> {w['name']}\n"
+        f"⚡️ <b>Bot Access:</b> {status_str}\n"
+        f"📨 <b>Sell Gmail Feature:</b> {sell_str}\n\n"
+        f"Use the buttons below to toggle permissions:"
+    )
+
+    kb = InlineKeyboardBuilder()
+    toggle_access_label = "🔴 Turn Worker OFF" if w['is_active'] else "🟢 Turn Worker ON"
+    toggle_sell_label = "🚫 Disable Sell Gmail" if w['can_sell_gmail'] else "📨 Enable Sell Gmail"
+
+    kb.button(text=toggle_access_label, callback_data=f"adm_work_tog_access:{worker_id}")
+    kb.button(text=toggle_sell_label, callback_data=f"adm_work_tog_sell:{worker_id}")
+    kb.button(text="⬅️ Back to Workers", callback_data="adm_work_back")
+    kb.adjust(1, 1, 1)
+
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb.as_markup())
+    except Exception:
+        pass
+
+@dp.callback_query(F.data.startswith("adm_work_tog_access:"))
+async def cb_admin_toggle_worker_access(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    worker_id = int(call.data.split(":")[1])
+
+    async with db_pool.acquire() as conn:
+        current_state = await conn.fetchval("SELECT is_active FROM worker_permissions WHERE worker_id=$1", worker_id)
+        new_state = not current_state
+        await conn.execute("UPDATE worker_permissions SET is_active=$1 WHERE worker_id=$2", new_state, worker_id)
+
+    status_msg = "ENABLED" if new_state else "DISABLED"
+    await call.answer(f"Worker {worker_id} access is now {status_msg}!", show_alert=True)
+    await cb_admin_view_worker(call)
+
+@dp.callback_query(F.data.startswith("adm_work_tog_sell:"))
+async def cb_admin_toggle_worker_sell(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    worker_id = int(call.data.split(":")[1])
+
+    async with db_pool.acquire() as conn:
+        current_state = await conn.fetchval("SELECT can_sell_gmail FROM worker_permissions WHERE worker_id=$1", worker_id)
+        new_state = not current_state
+        await conn.execute("UPDATE worker_permissions SET can_sell_gmail=$1 WHERE worker_id=$2", new_state, worker_id)
+
+    status_msg = "ENABLED" if new_state else "DISABLED"
+    await call.answer(f"Worker {worker_id} Sell Gmail is now {status_msg}!", show_alert=True)
+    await cb_admin_view_worker(call)
+
+# ============================================
 # ADMIN PANEL COMMAND & BUTTON HANDLERS
 # ============================================
 
@@ -2318,24 +2463,6 @@ async def open_admin_panel(message: Message, state: FSMContext):
         reply_markup=get_admin_menu_keyboard()
     )
 
-@dp.message(F.text.in_({"🔴 Worker: OFF", "🟢 Worker: ON"}), StateFilter("*"))
-async def admin_btn_toggle_worker_status(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        return
-    await state.clear()
-    global WORKER_STATUS
-    WORKER_STATUS = not WORKER_STATUS
-    new_val = 'on' if WORKER_STATUS else 'off'
-
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO bot_settings (key, value) VALUES ('worker_status', $1) ON CONFLICT (key) DO UPDATE SET value = $1", 
-            new_val
-        )
-
-    status_str = "🟢 <b>Worker Bot is now ENABLED!</b>" if WORKER_STATUS else "🔴 <b>Worker Bot is now DISABLED!</b> (Workers cannot add tasks, review, or broadcast)"
-    await message.answer(status_str, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
-    
 @dp.message(F.text.in_({"🔴 Ref Status: OFF", "🟢 Ref Status: ON"}), StateFilter("*"))
 async def admin_btn_toggle_ref_status(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -4697,11 +4824,10 @@ async def handle_task_submission(message: Message, state: FSMContext):
         await bot.send_message(ADMIN_ID, admin_msg_text + proof_text, reply_markup=admin_kb, parse_mode=ParseMode.HTML)
 
     if added_by_worker and str(added_by_worker) != str(ADMIN_ID):
-        worker_bot_token = os.environ.get("WORKER_BOT_TOKEN")
-        if worker_bot_token:
+        if WORKER_BOT_TOKEN:
             async def send_worker_alert():
                 try:
-                    w_bot = Bot(token=worker_bot_token)
+                    w_bot = Bot(token=WORKER_BOT_TOKEN)
                     worker_kb = InlineKeyboardMarkup(inline_keyboard=[[
                         InlineKeyboardButton(text="✅ Approve", callback_data=f"w_ta:{task_id}"),
                         InlineKeyboardButton(text="❌ Decline", callback_data=f"w_td:{task_id}")
