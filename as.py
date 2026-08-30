@@ -45,7 +45,7 @@ dp = Dispatcher(storage=MemoryStorage())
 
 db_pool = None
 BANNED_USERS_CACHE = set()
-SUPPORT_REQUESTS_CACHE = {}  # {user_id: {"username": str, "message": str}}
+SUPPORT_REQUESTS_CACHE = {}  # In-memory store: {user_id: {"username": str, "message": str}}
 MUST_JOIN_CHANNEL = None
 BOT_USERNAME = "GmailEarnexBot"
 BOT_STATUS = True           # True = ON, False = OFF
@@ -3765,6 +3765,11 @@ async def process_ban_user_step(message: Message, state: FSMContext):
             await state.clear()
             return
 
+        if target_id in BANNED_USERS_CACHE:
+            await message.answer(f"⚠️ User `{target_id}` is already banned.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+            await state.clear()
+            return
+
         async with db_pool.acquire() as conn:
             await conn.execute("INSERT INTO banned_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", target_id)
 
@@ -3785,8 +3790,14 @@ async def admin_btn_unban_user(message: Message, state: FSMContext):
 async def process_unban_user_step(message: Message, state: FSMContext):
     try:
         target_id = int(message.text.strip())
+
         async with db_pool.acquire() as conn:
-            await conn.execute("DELETE FROM banned_users WHERE user_id=$1", target_id)
+            res = await conn.execute("DELETE FROM banned_users WHERE user_id=$1", target_id)
+
+        if res == "DELETE 0" and target_id not in BANNED_USERS_CACHE:
+            await message.answer(f"⚠️ User `{target_id}` is not currently banned, so they cannot be unbanned.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+            await state.clear()
+            return
 
         BANNED_USERS_CACHE.discard(target_id)
         await message.answer(f"✅ **User `{target_id}` has been unbanned!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
