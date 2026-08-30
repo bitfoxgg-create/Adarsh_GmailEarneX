@@ -45,6 +45,7 @@ dp = Dispatcher(storage=MemoryStorage())
 
 db_pool = None
 BANNED_USERS_CACHE = set()
+SUPPORT_REQUESTS_CACHE = {}  # {user_id: {"username": str, "message": str}}
 MUST_JOIN_CHANNEL = None
 BOT_USERNAME = "GmailEarnexBot"
 BOT_STATUS = True           # True = ON, False = OFF
@@ -126,7 +127,6 @@ def get_provider_url() -> str:
 
 async def is_gmail_registered(email: str, user_id: int = None) -> bool:
     """Verifies Gmail account existence with auto-cleanup of verification notice."""
-    # 1. If validator is disabled by admin, accept all accounts immediately
     if not VALIDATOR_ENABLED:
         return True
 
@@ -357,7 +357,6 @@ async def init_db():
         ''')
         await conn.execute("ALTER TABLE task_assignments ADD COLUMN IF NOT EXISTS message_id BIGINT DEFAULT NULL")
 
-        # History log table for past task assignments
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS task_history (
                 id SERIAL PRIMARY KEY,
@@ -405,7 +404,6 @@ async def load_settings_and_cache():
         ultra_stat = await conn.fetchval("SELECT value FROM bot_settings WHERE key='ultra_status'")
         ULTRA_STATUS = (ultra_stat != 'off')
 
-        # Load worker bot status from DB
         worker_stat = await conn.fetchval("SELECT value FROM bot_settings WHERE key='worker_status'")
         WORKER_STATUS = (worker_stat != 'off')
 
@@ -512,7 +510,6 @@ async def ensure_user(user_id: int, referrer_id: int = None, conn=None) -> bool:
     return is_new
 
 async def get_user_data(user_id: int):
-    """Fetches real-time user data directly from the database without stale cache."""
     await ensure_user(user_id)
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -2051,34 +2048,38 @@ async def process_user_support_message(message: Message, state: FSMContext):
     user_id = message.from_user.id
     username = f"@{message.from_user.username}" if message.from_user.username else f"ID: {user_id}"
 
+    user_msg_content = message.caption if message.photo else message.text
+    if not user_msg_content:
+        user_msg_content = "Photo attachment"
+
+    SUPPORT_REQUESTS_CACHE[user_id] = {
+        "username": username,
+        "message": user_msg_content
+    }
+
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
-            text="💬 Reply User", 
-            callback_data=f"sr:{user_id}",
-            icon_custom_emoji_id="5870458774455587120",
+            text="👁 View Request", 
+            callback_data=f"view_supp:{user_id}",
             style="primary"
         )
     ]])
 
-    admin_ticket_text = (
-        f'🛠 <b>New Support Request</b>\n\n'
-        f'<b>From User:</b> {username} (<code>{user_id}</code>)\n'
-        f'<b>Date:</b> {datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")}\n'
-    )
+    admin_init_text = "🛠 <b>A new support request</b>"
 
     try:
         if message.photo:
             await bot.send_photo(
                 ADMIN_ID, 
                 photo=message.photo[-1].file_id, 
-                caption=admin_ticket_text + f"\n<b>Message:</b> {message.caption or 'Photo Proof'}",
+                caption=admin_init_text,
                 reply_markup=kb, 
                 parse_mode=ParseMode.HTML
             )
         else:
             await bot.send_message(
                 ADMIN_ID, 
-                admin_ticket_text + f"\n<b>Message:</b> {message.text}", 
+                admin_init_text, 
                 reply_markup=kb, 
                 parse_mode=ParseMode.HTML
             )
@@ -2093,6 +2094,104 @@ async def process_user_support_message(message: Message, state: FSMContext):
         await message.answer("❌ Failed to send your support message. Please try again later.", reply_markup=get_main_menu_keyboard())
 
     await state.clear()
+
+@dp.callback_query(F.data.startswith("view_supp:"))
+async def cb_admin_view_support(call: CallbackQuery):
+    await call.answer()
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    target_user_id = int(call.data.split(":")[1])
+    supp_info = SUPPORT_REQUESTS_CACHE.get(target_user_id, {})
+    username = supp_info.get("username", f"ID: {target_user_id}")
+    msg_text = supp_info.get("message", "N/A")
+
+    revealed_text = (
+        f"🛠 <b>Support Request</b>\n\n"
+        f"👤 <b>Username:</b> {username}\n"
+        f"🆔 <b>User ID:</b> <code>{target_user_id}</code>\n"
+        f"💬 <b>Support Message:</b>\n{msg_text}"
+    )
+
+    action_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="💬 Reply User",
+                callback_data=f"sr:{target_user_id}",
+                icon_custom_emoji_id="5870458774455587120",
+                style="primary"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🚫 Ban User",
+                callback_data=f"ban_supp:{target_user_id}",
+                icon_custom_emoji_id="5274099962655816924",
+                style="danger"
+            )
+        ]
+    ])
+
+    try:
+        if call.message.photo:
+            await call.message.edit_caption(
+                caption=revealed_text,
+                reply_markup=action_kb,
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            await call.message.edit_text(
+                text=revealed_text,
+                reply_markup=action_kb,
+                parse_mode=ParseMode.HTML
+            )
+    except Exception as e:
+        print(f"Error viewing support details: {e}")
+
+@dp.callback_query(F.data.startswith("ban_supp:"))
+async def cb_admin_ban_support_user(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    target_user_id = int(call.data.split(":")[1])
+    if target_user_id == ADMIN_ID:
+        await call.answer("❌ You cannot ban yourself!", show_alert=True)
+        return
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO banned_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", target_user_id)
+
+    BANNED_USERS_CACHE.add(target_user_id)
+    await call.answer("🚫 User has been directly banned!", show_alert=True)
+
+    action_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="💬 Reply User",
+                callback_data=f"sr:{target_user_id}",
+                icon_custom_emoji_id="5870458774455587120",
+                style="primary"
+            )
+        ]
+    ])
+
+    try:
+        if call.message.photo:
+            current_caption = call.message.caption or ""
+            await call.message.edit_caption(
+                caption=current_caption + "\n\n🚫 <b>User Banned</b>",
+                reply_markup=action_kb,
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            current_text = call.message.text or ""
+            await call.message.edit_text(
+                text=current_text + "\n\n🚫 <b>User Banned</b>",
+                reply_markup=action_kb,
+                parse_mode=ParseMode.HTML
+            )
+    except Exception as e:
+        print(f"Error editing banned support message: {e}")
 
 @dp.callback_query(F.data.startswith("sr:"))
 async def cb_admin_reply_support(call: CallbackQuery, state: FSMContext):
@@ -4567,7 +4666,6 @@ async def handle_task_submission(message: Message, state: FSMContext):
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
 
-    # 1. Admin Review Card (Sent via Primary Bot)
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text='Approve', callback_data=f'ta:{task_id}', icon_custom_emoji_id="6217663806110175239", style="success"),
         InlineKeyboardButton(text='Decline', callback_data=f'td:{task_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
@@ -4587,7 +4685,6 @@ async def handle_task_submission(message: Message, state: FSMContext):
         proof_text = f"\n\nProof: {message.text}"
         await bot.send_message(ADMIN_ID, admin_msg_text + proof_text, reply_markup=admin_kb, parse_mode=ParseMode.HTML)
 
-    # 2. Worker Review Card (Sent to Worker Bot ONLY if task was added by that worker)
     if added_by_worker and str(added_by_worker) != str(ADMIN_ID):
         worker_bot_token = os.environ.get("WORKER_BOT_TOKEN")
         if worker_bot_token:
