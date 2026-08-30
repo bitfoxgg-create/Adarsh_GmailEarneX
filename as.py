@@ -4976,13 +4976,13 @@ async def handle_task_submission(message: Message, state: FSMContext):
                 try:
                     w_bot = Bot(token=WORKER_BOT_TOKEN)
                     worker_kb = InlineKeyboardMarkup(inline_keyboard=[[
-                        InlineKeyboardButton(text="✅ Approve", callback_data=f"w_ta:{task_id}"),
-                        InlineKeyboardButton(text="❌ Decline", callback_data=f"w_td:{task_id}")
+                        InlineKeyboardButton(text="Approve", callback_data=f"w_ta:{task_id}", icon_custom_emoji_id="6217663806110175239", style="success"),
+                        InlineKeyboardButton(text="Decline", callback_data=f"w_td:{task_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
                     ]])
                     worker_msg_text = (
-                        f"📤 <b>New Task Submission #{task_id}</b>\n\n"
-                        f"📧 <b>Email:</b>\n<code>{email}</code>\n\n"
-                        f"🔑 <b>Password:</b>\n<code>{password}</code>"
+                        f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>New Task Submission #{task_id}</b>\n\n'
+                        f'📧 <b>Email:</b>\n<code>{email}</code>\n\n'
+                        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b>\n<code>{password}</code>'
                     )
                     
                     if message.photo:
@@ -5289,9 +5289,9 @@ async def reject_withdraw(call: CallbackQuery):
         await call.answer()
         user_id = w_data['user_id']
         payout_amount = w_data['amount']
-        method = w_data['method'] or 'UPI'
+        method = (w_data['method'] or 'UPI').lower()
 
-        fee = UPI_FEES if method == 'UPI' else (USDT_FEES if method == 'USDT BEP-20' else ULTRA_FEES)
+        fee = UPI_FEES if 'upi' in method else (USDT_FEES if 'usdt' in method else ULTRA_FEES)
         refund_total = payout_amount + fee
 
         async with conn.transaction():
@@ -5424,4 +5424,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-
