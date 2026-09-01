@@ -74,9 +74,9 @@ ULTRA_TOKEN = "niJeDFHRIN9ONCwxGparqUp0degHIpjHu0w3pprXok"
 ULTRA_KEY = "DL6mlu7DBRSR8odXWGG5"
 
 # VALIDATOR CONFIGURATION
-EMAILABLE_API_KEY = "05FXQPo7bT7K2ZtZ"
+EMAILABLE_API_KEY = "netnit_EFo0B5lNYSvZJ5eHMxX4SBNvT12Uq71"
 VALIDATOR_ENABLED = True     # True = Active, False = Deactivated
-VALIDATOR_PROVIDER = "myemailverifier"  # "myemailverifier" or "emailable"
+VALIDATOR_PROVIDER = "netnit"  # Options: "netnit", "emailable", "myemailverifier"
 
 # IN-MEMORY SPEED CACHES
 JOINED_CACHE = {}     # {user_id: timestamp_joined}
@@ -119,7 +119,9 @@ def generate_random_password(length: int = 12) -> str:
 # ============================================
 
 def get_provider_url() -> str:
-    if VALIDATOR_PROVIDER == "emailable":
+    if VALIDATOR_PROVIDER == "netnit":
+        return "https://apikey.netnit.net/fastcheck"
+    elif VALIDATOR_PROVIDER == "emailable":
         return "https://api.emailable.com/v1/verify?email={email}&api_key={key}"
     return "https://api.myemailverifier.com/api/validate_single.php?apikey={key}&email={email}"
 
@@ -157,34 +159,83 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
     is_valid_email = False
 
     try:
-        if VALIDATOR_PROVIDER == "emailable":
+        if VALIDATOR_PROVIDER == "netnit":
+            url = "https://apikey.netnit.net/fastcheck"
+            auth_header = EMAILABLE_API_KEY if EMAILABLE_API_KEY.startswith("Bearer ") else f"Bearer {EMAILABLE_API_KEY}"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": auth_header
+            }
+            payload = {"mail": [email]}
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=12.0)) as resp:
+                    if resp.status == 200:
+                        raw_text = await resp.text()
+                        try:
+                            data = json.loads(raw_text) if isinstance(raw_text, str) else await resp.json()
+                        except Exception:
+                            data = await resp.json()
+
+                        if isinstance(data, dict):
+                            # Handles {"example@gmail.com": "valid"} or {"results": [{"email": "...", "status": "valid"}]}
+                            for k, v in data.items():
+                                val_str = str(v).lower()
+                                if email in str(k).lower() and any(x in val_str for x in ["valid", "true", "deliverable", "1", "ok", "exist"]):
+                                    is_valid_email = True
+                                    break
+                                if isinstance(v, (dict, list)):
+                                    raw_sub = json.dumps(v).lower()
+                                    if email in raw_sub and any(x in raw_sub for x in ["valid", "true", "deliverable", "ok", "exist"]):
+                                        is_valid_email = True
+                                        break
+                            if not is_valid_email:
+                                raw_dump = json.dumps(data).lower()
+                                if any(x in raw_dump for x in ["valid", "exist", "deliverable", "true"]):
+                                    is_valid_email = True
+                        elif isinstance(data, list):
+                            raw_dump = json.dumps(data).lower()
+                            if any(x in raw_dump for x in ["valid", "exist", "deliverable", "true"]):
+                                is_valid_email = True
+                    else:
+                        print(f"Validator HTTP Error (Netnit): {resp.status}")
+
+        elif VALIDATOR_PROVIDER == "emailable":
             url = f"https://api.emailable.com/v1/verify?email={urllib.parse.quote(email)}&api_key={urllib.parse.quote(EMAILABLE_API_KEY)}"
-        else:
-            url = f"https://api.myemailverifier.com/api/validate_single.php?apikey={urllib.parse.quote(EMAILABLE_API_KEY)}&email={urllib.parse.quote(email)}"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=12.0)) as resp:
+                    if resp.status == 200:
+                        raw_text = await resp.text()
+                        try:
+                            data = json.loads(raw_text) if isinstance(raw_text, str) else await resp.json()
+                        except Exception:
+                            data = await resp.json()
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=12.0)) as resp:
-                if resp.status == 200:
-                    raw_text = await resp.text()
-                    try:
-                        data = json.loads(raw_text) if isinstance(raw_text, str) else await resp.json()
-                    except Exception:
-                        data = await resp.json()
-
-                    if isinstance(data, dict):
-                        lower_data = {str(k).lower(): str(v).strip().lower() for k, v in data.items()}
-
-                        if VALIDATOR_PROVIDER == "emailable":
+                        if isinstance(data, dict):
+                            lower_data = {str(k).lower(): str(v).strip().lower() for k, v in data.items()}
                             state = lower_data.get("state", "")
                             if state == "deliverable":
                                 is_valid_email = True
-                        else:
+                    else:
+                        print(f"Validator HTTP Error (emailable): {resp.status}")
+        else:
+            url = f"https://api.myemailverifier.com/api/validate_single.php?apikey={urllib.parse.quote(EMAILABLE_API_KEY)}&email={urllib.parse.quote(email)}"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=12.0)) as resp:
+                    if resp.status == 200:
+                        raw_text = await resp.text()
+                        try:
+                            data = json.loads(raw_text) if isinstance(raw_text, str) else await resp.json()
+                        except Exception:
+                            data = await resp.json()
+
+                        if isinstance(data, dict):
+                            lower_data = {str(k).lower(): str(v).strip().lower() for k, v in data.items()}
                             status_val = lower_data.get("status") or lower_data.get("addressstatus") or lower_data.get("statuscode") or ""
                             diagnosis_val = lower_data.get("diagnosis", "")
                             if status_val in ["valid", "1", "deliverable", "ok", "true"] or "exists" in diagnosis_val or "active" in diagnosis_val:
                                 is_valid_email = True
-                else:
-                    print(f"Validator HTTP Error ({VALIDATOR_PROVIDER}): {resp.status}")
+                    else:
+                        print(f"Validator HTTP Error (myemailverifier): {resp.status}")
     except Exception as e:
         print(f"Validator Exception ({VALIDATOR_PROVIDER}): {e}")
 
@@ -1997,7 +2048,6 @@ async def process_sell_password(message: Message, state: FSMContext):
         parse_mode=ParseMode.HTML
     )
 
-    # Broadcast real-time stock alert to all authorized workers
     async def alert_authorized_workers():
         if not WORKER_BOT_TOKEN:
             return
@@ -2522,7 +2572,6 @@ async def admin_cmd_delete_worker(message: Message, command: CommandObject):
         target_worker = active_workers[target_index - 1]
         target_worker_id = target_worker['worker_id']
 
-        # Complete off (is_active=FALSE) and mark as deleted
         await conn.execute("UPDATE worker_permissions SET is_active = FALSE, is_deleted = TRUE WHERE worker_id = $1", target_worker_id)
 
     await message.answer(
@@ -2563,7 +2612,6 @@ async def admin_cmd_recover_worker(message: Message, command: CommandObject):
         target_worker = deleted_workers[target_index - 1]
         target_worker_id = target_worker['worker_id']
 
-        # Restore worker, set is_active=TRUE, is_deleted=FALSE, and refresh created_at so it takes the latest free index
         await conn.execute(
             "UPDATE worker_permissions SET is_active = TRUE, is_deleted = FALSE, created_at = CURRENT_TIMESTAMP WHERE worker_id = $1",
             target_worker_id
@@ -2666,7 +2714,14 @@ async def admin_btn_validator_menu(message: Message, state: FSMContext):
     await state.clear()
     
     val_status_str = "🟢 <b>Active</b>" if VALIDATOR_ENABLED else "🔴 <b>Deactivated</b>"
-    provider_name = "Emailable" if VALIDATOR_PROVIDER == "emailable" else "MyEmailVerifier"
+    
+    if VALIDATOR_PROVIDER == "netnit":
+        provider_name = "Netnit"
+    elif VALIDATOR_PROVIDER == "emailable":
+        provider_name = "Emailable"
+    else:
+        provider_name = "MyEmailVerifier"
+        
     provider_url = get_provider_url()
 
     text = (
@@ -2691,7 +2746,13 @@ async def cb_admin_validator_toggle_status(call: CallbackQuery):
         await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('validator_enabled', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
 
     status_text = "🟢 <b>Active</b>" if VALIDATOR_ENABLED else "🔴 <b>Deactivated</b>"
-    provider_name = "Emailable" if VALIDATOR_PROVIDER == "emailable" else "MyEmailVerifier"
+    if VALIDATOR_PROVIDER == "netnit":
+        provider_name = "Netnit"
+    elif VALIDATOR_PROVIDER == "emailable":
+        provider_name = "Emailable"
+    else:
+        provider_name = "MyEmailVerifier"
+        
     provider_url = get_provider_url()
 
     text = (
@@ -2711,13 +2772,24 @@ async def cb_admin_validator_toggle_status(call: CallbackQuery):
 @dp.callback_query(F.data == "admin_validator_change_provider")
 async def cb_admin_validator_change_provider(call: CallbackQuery):
     global VALIDATOR_PROVIDER
-    VALIDATOR_PROVIDER = "emailable" if VALIDATOR_PROVIDER == "myemailverifier" else "myemailverifier"
+    if VALIDATOR_PROVIDER == "netnit":
+        VALIDATOR_PROVIDER = "myemailverifier"
+    elif VALIDATOR_PROVIDER == "myemailverifier":
+        VALIDATOR_PROVIDER = "emailable"
+    else:
+        VALIDATOR_PROVIDER = "netnit"
 
     async with db_pool.acquire() as conn:
         await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('validator_provider', $1) ON CONFLICT (key) DO UPDATE SET value = $1", VALIDATOR_PROVIDER)
 
     status_text = "🟢 <b>Active</b>" if VALIDATOR_ENABLED else "🔴 <b>Deactivated</b>"
-    provider_name = "Emailable" if VALIDATOR_PROVIDER == "emailable" else "MyEmailVerifier"
+    if VALIDATOR_PROVIDER == "netnit":
+        provider_name = "Netnit"
+    elif VALIDATOR_PROVIDER == "emailable":
+        provider_name = "Emailable"
+    else:
+        provider_name = "MyEmailVerifier"
+        
     provider_url = get_provider_url()
 
     await call.answer(f"Switched provider to {provider_name}!", show_alert=True)
@@ -2739,7 +2811,12 @@ async def cb_admin_validator_change_provider(call: CallbackQuery):
 @dp.callback_query(F.data == "admin_validator_change_key")
 async def cb_admin_validator_change_key(call: CallbackQuery, state: FSMContext):
     await call.answer()
-    provider_name = "Emailable" if VALIDATOR_PROVIDER == "emailable" else "MyEmailVerifier"
+    if VALIDATOR_PROVIDER == "netnit":
+        provider_name = "Netnit"
+    elif VALIDATOR_PROVIDER == "emailable":
+        provider_name = "Emailable"
+    else:
+        provider_name = "MyEmailVerifier"
 
     await state.set_state(AdminState.waiting_for_validator_key)
     await call.message.answer(
@@ -2757,7 +2834,12 @@ async def process_change_validator_key(message: Message, state: FSMContext):
     async with db_pool.acquire() as conn:
         await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('emailable_api_key', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_key)
 
-    provider_name = "Emailable" if VALIDATOR_PROVIDER == "emailable" else "MyEmailVerifier"
+    if VALIDATOR_PROVIDER == "netnit":
+        provider_name = "Netnit"
+    elif VALIDATOR_PROVIDER == "emailable":
+        provider_name = "Emailable"
+    else:
+        provider_name = "MyEmailVerifier"
 
     await message.answer(
         f"✅ <b>{provider_name} API Key Updated Successfully!</b>\n\n"
