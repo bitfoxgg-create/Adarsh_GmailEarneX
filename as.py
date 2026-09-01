@@ -5003,12 +5003,12 @@ async def handle_task_submission(message: Message, state: FSMContext):
         return
 
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)[cite: 1]
+        await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
 
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text='Approve', callback_data=f'ta:{task_id}', icon_custom_emoji_id="6217663806110175239", style="success"),
         InlineKeyboardButton(text='Decline', callback_data=f'td:{task_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
-    ]])[cite: 1]
+    ]])
 
     admin_msg_text = (
         f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>Task Submission #{task_id}</b>\n\n'
@@ -5016,52 +5016,52 @@ async def handle_task_submission(message: Message, state: FSMContext):
         f'📧 <b>Email:</b>\n<code>{email}</code>\n\n'
         f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b>\n<code>{password}</code>\n\n'
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}'
-    )[cite: 1]
+    )
 
     if message.photo:
-        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_msg_text, reply_markup=admin_kb, parse_mode=ParseMode.HTML)[cite: 1]
+        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_msg_text, reply_markup=admin_kb, parse_mode=ParseMode.HTML)
     else:
-        proof_text = f"\n\nProof: {message.text}"[cite: 1]
-        await bot.send_message(ADMIN_ID, admin_msg_text + proof_text, reply_markup=admin_kb, parse_mode=ParseMode.HTML)[cite: 1]
+        proof_text = f"\n\nProof: {message.text}"
+        await bot.send_message(ADMIN_ID, admin_msg_text + proof_text, reply_markup=admin_kb, parse_mode=ParseMode.HTML)
 
-    if added_by_worker and str(added_by_worker) != str(ADMIN_ID):[cite: 1]
-        if WORKER_BOT_TOKEN:[cite: 1]
+    if added_by_worker and str(added_by_worker) != str(ADMIN_ID):
+        if WORKER_BOT_TOKEN:
             async def send_worker_alert():
                 try:
-                    w_bot = Bot(token=WORKER_BOT_TOKEN)[cite: 1]
+                    w_bot = Bot(token=WORKER_BOT_TOKEN)
                     worker_kb = InlineKeyboardMarkup(inline_keyboard=[[
                         InlineKeyboardButton(text="Approve", callback_data=f"w_ta:{task_id}", icon_custom_emoji_id="6217663806110175239", style="success"),
                         InlineKeyboardButton(text="Decline", callback_data=f"w_td:{task_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
-                    ]])[cite: 1]
+                    ]])
                     worker_msg_text = (
                         f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>New Task Submission #{task_id}</b>\n\n'
                         f'📧 <b>Email:</b>\n<code>{email}</code>\n\n'
                         f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b>\n<code>{password}</code>'
-                    )[cite: 1]
+                    )
                     
-                    if message.photo:[cite: 1]
-                        photo_id = message.photo[-1].file_id[cite: 1]
-                        if message.caption:[cite: 1]
-                            worker_msg_text += f"\n\n📝 <b>Proof:</b> {message.caption}"[cite: 1]
-                        await w_bot.send_photo(added_by_worker, photo=photo_id, caption=worker_msg_text, reply_markup=worker_kb, parse_mode=ParseMode.HTML)[cite: 1]
+                    if message.photo:
+                        photo_id = message.photo[-1].file_id
+                        if message.caption:
+                            worker_msg_text += f"\n\n📝 <b>Proof:</b> {message.caption}"
+                        await w_bot.send_photo(added_by_worker, photo=photo_id, caption=worker_msg_text, reply_markup=worker_kb, parse_mode=ParseMode.HTML)
                     else:
-                        worker_msg_text += f"\n\n📝 <b>Proof:</b> {message.text}"[cite: 1]
-                        await w_bot.send_message(added_by_worker, worker_msg_text, reply_markup=worker_kb, parse_mode=ParseMode.HTML)[cite: 1]
+                        worker_msg_text += f"\n\n📝 <b>Proof:</b> {message.text}"
+                        await w_bot.send_message(added_by_worker, worker_msg_text, reply_markup=worker_kb, parse_mode=ParseMode.HTML)
                     
-                    await w_bot.session.close()[cite: 1]
+                    await w_bot.session.close()
                 except Exception as err:
-                    print(f"Error sending worker real-time submission alert: {err}")[cite: 1]
+                    print(f"Error sending worker real-time submission alert: {err}")
 
-            asyncio.create_task(send_worker_alert())[cite: 1]
+            asyncio.create_task(send_worker_alert())
 
     sent_msg = await message.answer(
         f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Task #{task_id} submission sent for review.\n\n'
         f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
         reply_markup=get_main_menu_keyboard(), 
         parse_mode=ParseMode.HTML
-    )[cite: 1]
-    await state.clear()[cite: 1]
-    await state.update_data(last_menu_msg_id=sent_msg.message_id)[cite: 1]
+    )
+    await state.clear()
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 # ============================================
 # UNIFIED SELL APPROVE & DECLINE HANDLERS
@@ -5069,107 +5069,107 @@ async def handle_task_submission(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("sa:"))
 async def approve_sell_unified(call: CallbackQuery):
-    sell_id = int(call.data.split(":")[1])[cite: 1]
+    sell_id = int(call.data.split(":")[1])
 
     async with db_pool.acquire() as conn:
-        sell_data = await conn.fetchrow("SELECT user_id, amount, status FROM pending_sells WHERE id=$1", sell_id)[cite: 1]
-        if not sell_data or sell_data['status'] != 'pending_review':[cite: 1]
-            await call.answer("⚠️ This request is already processed!", show_alert=True)[cite: 1]
+        sell_data = await conn.fetchrow("SELECT user_id, amount, status FROM pending_sells WHERE id=$1", sell_id)
+        if not sell_data or sell_data['status'] != 'pending_review':
+            await call.answer("⚠️ This request is already processed!", show_alert=True)
             return
 
-        await call.answer()[cite: 1]
-        user_id = sell_data['user_id'][cite: 1]
-        amount = sell_data['amount'][cite: 1]
+        await call.answer()
+        user_id = sell_data['user_id']
+        amount = sell_data['amount']
 
-        await ensure_user(user_id, conn=conn)[cite: 1]
+        await ensure_user(user_id, conn=conn)
 
         async with conn.transaction():
-            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", amount, user_id)[cite: 1]
-            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, f"Gmail sell #{sell_id} approved")[cite: 1]
-            await conn.execute("UPDATE pending_sells SET status='approved' WHERE id=$1", sell_id)[cite: 1]
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", amount, user_id)
+            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, f"Gmail sell #{sell_id} approved")
+            await conn.execute("UPDATE pending_sells SET status='approved' WHERE id=$1", sell_id)
 
-            referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)[cite: 1]
+            referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
 
-        if REF_STATUS and referred_by and referred_by != user_id:[cite: 1]
-            await ensure_user(referred_by, conn=conn)[cite: 1]
-            ref_reward = REFERRAL_SELL_BONUS[cite: 1]
+        if REF_STATUS and referred_by and referred_by != user_id:
+            await ensure_user(referred_by, conn=conn)
+            ref_reward = REFERRAL_SELL_BONUS
             async with conn.transaction():
-                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)[cite: 1]
-                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")[cite: 1]
+                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
+                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
             
-            invalidate_user_cache(referred_by)[cite: 1]
+            invalidate_user_cache(referred_by)
             
             async def notify_ref():
-                ref_user_data = await get_user_data(referred_by)[cite: 1]
-                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])[cite: 1]
+                ref_user_data = await get_user_data(referred_by)
+                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
                 notif_text = (
                     f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> sell gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
-                )[cite: 1]
-                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)[cite: 1]
+                )
+                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
             
-            asyncio.create_task(notify_ref())[cite: 1]
+            asyncio.create_task(notify_ref())
 
-    invalidate_user_cache(user_id)[cite: 1]
-    await edit_admin_message(call, '✅ Sell Request Approved')[cite: 1]
+    invalidate_user_cache(user_id)
+    await edit_admin_message(call, '✅ Sell Request Approved')
     
     async def notify_user():
-        user_data = await get_user_data(user_id)[cite: 1]
-        formatted_amt = format_currency(amount, user_data['currency'])[cite: 1]
-        await send_user_notification(user_id, f"🎉 Your Gmail sell request #{sell_id} was approved!\n+{formatted_amt} added to your balance.")[cite: 1]
+        user_data = await get_user_data(user_id)
+        formatted_amt = format_currency(amount, user_data['currency'])
+        await send_user_notification(user_id, f"🎉 Your Gmail sell request #{sell_id} was approved!\n+{formatted_amt} added to your balance.")
 
-    asyncio.create_task(notify_user())[cite: 1]
+    asyncio.create_task(notify_user())
 
 @dp.callback_query(F.data.startswith("sd:"))
 async def decline_sell_unified(call: CallbackQuery, state: FSMContext):
-    sell_id = int(call.data.split(":")[1])[cite: 1]
+    sell_id = int(call.data.split(":")[1])
 
     async with db_pool.acquire() as conn:
-        sell_data = await conn.fetchrow("SELECT user_id, status FROM pending_sells WHERE id=$1", sell_id)[cite: 1]
-        if not sell_data or sell_data['status'] != 'pending_review':[cite: 1]
-            await call.answer("⚠️ This request is already processed!", show_alert=True)[cite: 1]
+        sell_data = await conn.fetchrow("SELECT user_id, status FROM pending_sells WHERE id=$1", sell_id)
+        if not sell_data or sell_data['status'] != 'pending_review':
+            await call.answer("⚠️ This request is already processed!", show_alert=True)
             return
-        user_id = sell_data['user_id'][cite: 1]
+        user_id = sell_data['user_id']
 
-    await call.answer()[cite: 1]
-    await state.set_state(AdminState.waiting_for_sell_reject_reason)[cite: 1]
+    await call.answer()
+    await state.set_state(AdminState.waiting_for_sell_reject_reason)
     await state.update_data(
         sell_id=sell_id,
         user_id=user_id, 
         admin_msg_id=call.message.message_id,
         is_photo=bool(call.message.photo)
-    )[cite: 1]
-    await call.message.answer('<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining this sell request:</b>', parse_mode=ParseMode.HTML)[cite: 1]
+    )
+    await call.message.answer('<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining this sell request:</b>', parse_mode=ParseMode.HTML)
 
 @dp.message(AdminState.waiting_for_sell_reject_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_reject_reason(message: Message, state: FSMContext):
-    data = await state.get_data()[cite: 1]
-    sell_id = data.get('sell_id')[cite: 1]
-    user_id = data['user_id'][cite: 1]
-    admin_msg_id = data['admin_msg_id'][cite: 1]
-    is_photo = data['is_photo'][cite: 1]
-    reason = message.text.strip()[cite: 1]
+    data = await state.get_data()
+    sell_id = data.get('sell_id')
+    user_id = data['user_id']
+    admin_msg_id = data['admin_msg_id']
+    is_photo = data['is_photo']
+    reason = message.text.strip()
 
-    if sell_id:[cite: 1]
+    if sell_id:
         async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE pending_sells SET status='declined' WHERE id=$1", sell_id)[cite: 1]
+            await conn.execute("UPDATE pending_sells SET status='declined' WHERE id=$1", sell_id)
 
-    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Sell request declined.</b>\n<b>Reason:</b> {reason}'[cite: 1]
+    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Sell request declined.</b>\n<b>Reason:</b> {reason}'
     try:
-        if is_photo:[cite: 1]
-            await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)[cite: 1]
+        if is_photo:
+            await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
         else:
-            await bot.edit_message_text(chat_id=message.chat.id, message_id=admin_msg_id, text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)[cite: 1]
+            await bot.edit_message_text(chat_id=message.chat.id, message_id=admin_msg_id, text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
     except Exception as e:
-        print(f"Error editing admin msg: {e}")[cite: 1]
+        print(f"Error editing admin msg: {e}")
 
     asyncio.create_task(send_user_notification(
         user_id, 
         f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request #{sell_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}', 
         parse_mode=ParseMode.HTML
-    ))[cite: 1]
+    ))
 
-    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason sent to user.', parse_mode=ParseMode.HTML)[cite: 1]
-    await state.clear()[cite: 1]
+    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason sent to user.', parse_mode=ParseMode.HTML)
+    await state.clear()
 
 # ============================================
 # TASK APPROVE & DECLINE HANDLERS
@@ -5177,123 +5177,123 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("ta:"))
 async def approve_task(call: CallbackQuery):
-    task_id = int(call.data.split(":")[1])[cite: 1]
+    task_id = int(call.data.split(":")[1])
     
     async with db_pool.acquire() as conn:
-        task_data = await conn.fetchrow("SELECT reward, status, details FROM tasks WHERE id=$1", task_id)[cite: 1]
-        if not task_data or task_data['status'] != 'pending_review':[cite: 1]
-            await call.answer("⚠️ This request is already processed!", show_alert=True)[cite: 1]
+        task_data = await conn.fetchrow("SELECT reward, status, details FROM tasks WHERE id=$1", task_id)
+        if not task_data or task_data['status'] != 'pending_review':
+            await call.answer("⚠️ This request is already processed!", show_alert=True)
             return
 
-        await call.answer()[cite: 1]
-        reward = task_data['reward'][cite: 1]
-        assigned_user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)[cite: 1]
-        if not assigned_user_id:[cite: 1]
+        await call.answer()
+        reward = task_data['reward']
+        assigned_user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
+        if not assigned_user_id:
             return
 
-        user_id = assigned_user_id[cite: 1]
+        user_id = assigned_user_id
         try:
-            task_email = task_data['details'].split(" | ")[0].replace("Email: ", "").strip()[cite: 1]
+            task_email = task_data['details'].split(" | ")[0].replace("Email: ", "").strip()
         except Exception:
-            task_email = "Task Account"[cite: 1]
+            task_email = "Task Account"
 
-        await ensure_user(user_id, conn=conn)[cite: 1]
+        await ensure_user(user_id, conn=conn)
 
         async with conn.transaction():
-            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", reward, user_id)[cite: 1]
-            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "task", reward, f"{task_email} #{task_id}")[cite: 1]
-            await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)[cite: 1]
-            await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)[cite: 1]
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", reward, user_id)
+            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "task", reward, f"{task_email} #{task_id}")
+            await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
+            await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)
 
-            referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)[cite: 1]
+            referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
 
-        if REF_STATUS and referred_by and referred_by != user_id:[cite: 1]
-            await ensure_user(referred_by, conn=conn)[cite: 1]
-            ref_reward = REFERRAL_TASK_BONUS[cite: 1]
+        if REF_STATUS and referred_by and referred_by != user_id:
+            await ensure_user(referred_by, conn=conn)
+            ref_reward = REFERRAL_TASK_BONUS
             async with conn.transaction():
-                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)[cite: 1]
-                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")[cite: 1]
+                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
+                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
             
-            invalidate_user_cache(referred_by)[cite: 1]
+            invalidate_user_cache(referred_by)
 
             async def notify_ref():
-                ref_user_data = await get_user_data(referred_by)[cite: 1]
-                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])[cite: 1]
+                ref_user_data = await get_user_data(referred_by)
+                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
                 notif_text = (
                     f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> task gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
-                )[cite: 1]
-                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)[cite: 1]
+                )
+                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
 
-            asyncio.create_task(notify_ref())[cite: 1]
+            asyncio.create_task(notify_ref())
             
-    invalidate_user_cache(user_id)[cite: 1]
-    await edit_admin_message(call, '✅ Task Approved')[cite: 1]
+    invalidate_user_cache(user_id)
+    await edit_admin_message(call, '✅ Task Approved')
 
     async def notify_user():
-        user_data = await get_user_data(user_id)[cite: 1]
-        formatted_reward = format_currency(reward, user_data['currency'])[cite: 1]
-        await send_user_notification(user_id, f"🎉 Task #{task_id} approved!\n+{formatted_reward} added to your balance.")[cite: 1]
+        user_data = await get_user_data(user_id)
+        formatted_reward = format_currency(reward, user_data['currency'])
+        await send_user_notification(user_id, f"🎉 Task #{task_id} approved!\n+{formatted_reward} added to your balance.")
 
-    asyncio.create_task(notify_user())[cite: 1]
+    asyncio.create_task(notify_user())
 
 @dp.callback_query(F.data.startswith("td:"))
 async def decline_task(call: CallbackQuery, state: FSMContext):
-    task_id = int(call.data.split(":")[1])[cite: 1]
+    task_id = int(call.data.split(":")[1])
 
     async with db_pool.acquire() as conn:
-        task_data = await conn.fetchrow("SELECT status FROM tasks WHERE id=$1", task_id)[cite: 1]
-        if not task_data or task_data['status'] != 'pending_review':[cite: 1]
-            await call.answer("⚠️ This request is already processed!", show_alert=True)[cite: 1]
+        task_data = await conn.fetchrow("SELECT status FROM tasks WHERE id=$1", task_id)
+        if not task_data or task_data['status'] != 'pending_review':
+            await call.answer("⚠️ This request is already processed!", show_alert=True)
             return
 
-        user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)[cite: 1]
+        user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
 
-    if not user_id:[cite: 1]
+    if not user_id:
         return
 
-    await call.answer()[cite: 1]
-    await state.set_state(AdminState.waiting_for_task_reject_reason)[cite: 1]
+    await call.answer()
+    await state.set_state(AdminState.waiting_for_task_reject_reason)
     await state.update_data(
         task_id=task_id, 
         user_id=user_id, 
         admin_msg_id=call.message.message_id,
         is_photo=bool(call.message.photo)
-    )[cite: 1]
-    await call.message.answer(f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining Task #{task_id}:</b>', parse_mode=ParseMode.HTML)[cite: 1]
+    )
+    await call.message.answer(f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining Task #{task_id}:</b>', parse_mode=ParseMode.HTML)
 
 @dp.message(AdminState.waiting_for_task_reject_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_task_reject_reason(message: Message, state: FSMContext):
-    data = await state.get_data()[cite: 1]
-    task_id = data['task_id'][cite: 1]
-    user_id = data['user_id'][cite: 1]
-    admin_msg_id = data['admin_msg_id'][cite: 1]
-    is_photo = data['is_photo'][cite: 1]
-    reason = message.text.strip()[cite: 1]
+    data = await state.get_data()
+    task_id = data['task_id']
+    user_id = data['user_id']
+    admin_msg_id = data['admin_msg_id']
+    is_photo = data['is_photo']
+    reason = message.text.strip()
 
     async with db_pool.acquire() as conn:
-        current_status = await conn.fetchval("SELECT status FROM tasks WHERE id=$1", task_id)[cite: 1]
-        if current_status == 'pending_review':[cite: 1]
+        current_status = await conn.fetchval("SELECT status FROM tasks WHERE id=$1", task_id)
+        if current_status == 'pending_review':
             async with conn.transaction():
-                await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)[cite: 1]
-                await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)[cite: 1]
+                await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
+                await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
 
-    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Task #{task_id} declined.</b>\n<b>Reason:</b> {reason}'[cite: 1]
+    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Task #{task_id} declined.</b>\n<b>Reason:</b> {reason}'
     try:
-        if is_photo:[cite: 1]
-            await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)[cite: 1]
+        if is_photo:
+            await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
         else:
-            await bot.edit_message_text(chat_id=message.chat.id, message_id=admin_msg_id, text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)[cite: 1]
+            await bot.edit_message_text(chat_id=message.chat.id, message_id=admin_msg_id, text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
     except Exception as e:
-        print(f"Error editing admin msg: {e}")[cite: 1]
+        print(f"Error editing admin msg: {e}")
 
     asyncio.create_task(send_user_notification(
         user_id, 
         f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your submission for Task #{task_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}\n\n<tg-emoji emoji-id="5251203410396458957">🛡</tg-emoji> The task has been returned to the pool.', 
         parse_mode=ParseMode.HTML
-    ))[cite: 1]
+    ))
 
-    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason recorded and user notified.', parse_mode=ParseMode.HTML)[cite: 1]
-    await state.clear()[cite: 1]
+    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason recorded and user notified.', parse_mode=ParseMode.HTML)
+    await state.clear()
 
 # ============================================
 # WITHDRAWAL CALLBACKS (ADMIN SIDE)
@@ -5301,76 +5301,76 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("wp:"))
 async def pay_withdraw(call: CallbackQuery):
-    withdrawal_id = int(call.data.split(":")[1])[cite: 1]
+    withdrawal_id = int(call.data.split(":")[1])
 
     async with db_pool.acquire() as conn:
-        w_data = await conn.fetchrow("SELECT user_id, amount, status FROM withdrawals WHERE id=$1", withdrawal_id)[cite: 1]
-        if not w_data or w_data['status'] != 'pending':[cite: 1]
-            await call.answer("⚠️ This request is already processed!", show_alert=True)[cite: 1]
+        w_data = await conn.fetchrow("SELECT user_id, amount, status FROM withdrawals WHERE id=$1", withdrawal_id)
+        if not w_data or w_data['status'] != 'pending':
+            await call.answer("⚠️ This request is already processed!", show_alert=True)
             return
 
-        await call.answer()[cite: 1]
-        user_id = w_data['user_id'][cite: 1]
-        payout_amount = w_data['amount'][cite: 1]
+        await call.answer()
+        user_id = w_data['user_id']
+        payout_amount = w_data['amount']
 
         async with conn.transaction():
-            await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)[cite: 1]
+            await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)
             await conn.execute(
                 "UPDATE transactions SET type='withdrawal', note=$1 WHERE user_id=$2 AND note LIKE $3",
                 "Withdrawal paid", user_id, f"%Withdrawal #{withdrawal_id}%"
-            )[cite: 1]
+            )
 
-    invalidate_user_cache(user_id)[cite: 1]
-    await edit_admin_message(call, '✅ Withdrawal Paid')[cite: 1]
+    invalidate_user_cache(user_id)
+    await edit_admin_message(call, '✅ Withdrawal Paid')
 
     async def notify_user():
-        user_data = await get_user_data(user_id)[cite: 1]
-        formatted_amt = format_currency(payout_amount, user_data['currency'])[cite: 1]
-        await send_user_notification(user_id, f"🎉 Your withdrawal request of {formatted_amt} has been approved and paid!")[cite: 1]
+        user_data = await get_user_data(user_id)
+        formatted_amt = format_currency(payout_amount, user_data['currency'])
+        await send_user_notification(user_id, f"🎉 Your withdrawal request of {formatted_amt} has been approved and paid!")
 
-    asyncio.create_task(notify_user())[cite: 1]
+    asyncio.create_task(notify_user())
 
 @dp.callback_query(F.data.startswith("wr:"))
 async def reject_withdraw(call: CallbackQuery):
-    withdrawal_id = int(call.data.split(":")[1])[cite: 1]
+    withdrawal_id = int(call.data.split(":")[1])
     
     async with db_pool.acquire() as conn:
-        w_data = await conn.fetchrow("SELECT user_id, amount, method, status FROM withdrawals WHERE id=$1", withdrawal_id)[cite: 1]
-        if not w_data or w_data['status'] != 'pending':[cite: 1]
-            await call.answer("⚠️ This request is already processed!", show_alert=True)[cite: 1]
+        w_data = await conn.fetchrow("SELECT user_id, amount, method, status FROM withdrawals WHERE id=$1", withdrawal_id)
+        if not w_data or w_data['status'] != 'pending':
+            await call.answer("⚠️ This request is already processed!", show_alert=True)
             return
 
-        await call.answer()[cite: 1]
-        user_id = w_data['user_id'][cite: 1]
-        payout_amount = w_data['amount'][cite: 1]
-        method = (w_data['method'] or 'UPI').lower()[cite: 1]
+        await call.answer()
+        user_id = w_data['user_id']
+        payout_amount = w_data['amount']
+        method = (w_data['method'] or 'UPI').lower()
 
-        fee = UPI_FEES if 'upi' in method else (USDT_FEES if 'usdt' in method else ULTRA_FEES)[cite: 1]
-        refund_total = payout_amount + fee[cite: 1]
+        fee = UPI_FEES if 'upi' in method else (USDT_FEES if 'usdt' in method else ULTRA_FEES)
+        refund_total = payout_amount + fee
 
         async with conn.transaction():
-            await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)[cite: 1]
-            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", refund_total, user_id)[cite: 1]
-            await conn.execute("DELETE FROM transactions WHERE user_id=$1 AND note LIKE $2", user_id, f"%Withdrawal #{withdrawal_id}%")[cite: 1]
+            await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", refund_total, user_id)
+            await conn.execute("DELETE FROM transactions WHERE user_id=$1 AND note LIKE $2", user_id, f"%Withdrawal #{withdrawal_id}%")
             await conn.execute(
                 "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
                 user_id, "refund", refund_total, f"Refund for rejected withdrawal #{withdrawal_id}"
-            )[cite: 1]
+            )
             
-    invalidate_user_cache(user_id)[cite: 1]
-    await edit_admin_message(call, '⚠️ Withdrawal Rejected (Balance Refunded)')[cite: 1]
+    invalidate_user_cache(user_id)
+    await edit_admin_message(call, '⚠️ Withdrawal Rejected (Balance Refunded)')
     
     async def notify_user_refund():
-        user_data = await get_user_data(user_id)[cite: 1]
-        formatted_amt = format_currency(refund_total, user_data['currency'])[cite: 1]
+        user_data = await get_user_data(user_id)
+        formatted_amt = format_currency(refund_total, user_data['currency'])
         await send_user_notification(
             user_id, 
             f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request #{withdrawal_id} was rejected.\n'
             f'💰 <b>{formatted_amt}</b> has been refunded back to your balance.', 
             parse_mode=ParseMode.HTML
-        )[cite: 1]
+        )
 
-    asyncio.create_task(notify_user_refund())[cite: 1]
+    asyncio.create_task(notify_user_refund())
 
 # ============================================
 # OPTIMIZED AUTO EXPIRE TASKS ENGINE
@@ -5386,26 +5386,26 @@ async def auto_expire_tasks():
                     FROM task_assignments ta
                     JOIN tasks t ON ta.task_id = t.id
                     WHERE t.status = 'assigned'
-                ''')[cite: 1]
+                ''')
                 
-                now = datetime.utcnow()[cite: 1]
+                now = datetime.utcnow()
                 for r in rows_30m:
-                    if now - r['assigned_at'] > timedelta(minutes=30):[cite: 1]
-                        expired_30m.append((r['task_id'], r['user_id']))[cite: 1]
+                    if now - r['assigned_at'] > timedelta(minutes=30):
+                        expired_30m.append((r['task_id'], r['user_id']))
 
-                if expired_30m:[cite: 1]
-                    task_ids_30m = [t[0] for t in expired_30m][cite: 1]
+                if expired_30m:
+                    task_ids_30m = [t[0] for t in expired_30m]
                     async with conn.transaction():
-                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', task_ids_30m)[cite: 1]
-                        await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids_30m)[cite: 1]
+                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', task_ids_30m)
+                        await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids_30m)
 
-            for task_id, user_id in expired_30m:[cite: 1]
+            for task_id, user_id in expired_30m:
                 asyncio.create_task(send_user_notification(
                     user_id, 
                     f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Task #{task_id} time limit expired (30 mins).\nThe task was returned to the pool.', 
                     reply_markup=get_main_menu_keyboard(), 
                     parse_mode=ParseMode.HTML
-                ))[cite: 1]
+                ))
 
             expired_lifetime_tasks = []
             async with db_pool.acquire() as conn:
@@ -5414,67 +5414,67 @@ async def auto_expire_tasks():
                     FROM tasks t
                     LEFT JOIN task_assignments ta ON t.id = ta.task_id
                     WHERE t.status != 'completed'
-                ''')[cite: 1]
+                ''')
 
-                now = datetime.utcnow()[cite: 1]
+                now = datetime.utcnow()
                 for r in rows_lifetime:
-                    created_at = r['created_at'] or now[cite: 1]
-                    if now - created_at > timedelta(hours=23, minutes=30):[cite: 1]
+                    created_at = r['created_at'] or now
+                    if now - created_at > timedelta(hours=23, minutes=30):
                         expired_lifetime_tasks.append({
                             'id': r['id'],
                             'details': r['details'],
                             'user_id': r['user_id']
-                        })[cite: 1]
+                        })
 
-                if expired_lifetime_tasks:[cite: 1]
-                    expired_ids = [t['id'] for t in expired_lifetime_tasks][cite: 1]
+                if expired_lifetime_tasks:
+                    expired_ids = [t['id'] for t in expired_lifetime_tasks]
                     async with conn.transaction():
-                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', expired_ids)[cite: 1]
-                        await conn.execute('DELETE FROM tasks WHERE id = ANY($1::int[])', expired_ids)[cite: 1]
+                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', expired_ids)
+                        await conn.execute('DELETE FROM tasks WHERE id = ANY($1::int[])', expired_ids)
 
-            for item in expired_lifetime_tasks:[cite: 1]
-                task_id = item['id'][cite: 1]
-                assigned_u = item['user_id'][cite: 1]
+            for item in expired_lifetime_tasks:
+                task_id = item['id']
+                assigned_u = item['user_id']
                 try:
-                    email_str = item['details'].split(" | ")[0].replace("Email: ", "").strip()[cite: 1]
+                    email_str = item['details'].split(" | ")[0].replace("Email: ", "").strip()
                 except Exception:
-                    email_str = f"Task #{task_id}"[cite: 1]
+                    email_str = f"Task #{task_id}"
 
-                admin_notice = f"⏰ <b>Task Expiry Alert:</b>\nTask #{task_id} (<code>{email_str}</code>) expired after 23h 30m and was automatically removed."[cite: 1]
+                admin_notice = f"⏰ <b>Task Expiry Alert:</b>\nTask #{task_id} (<code>{email_str}</code>) expired after 23h 30m and was automatically removed."
                 try:
-                    await bot.send_message(ADMIN_ID, admin_notice, parse_mode=ParseMode.HTML)[cite: 1]
+                    await bot.send_message(ADMIN_ID, admin_notice, parse_mode=ParseMode.HTML)
                 except Exception:
                     pass
 
-                if assigned_u:[cite: 1]
-                    user_notice = f"⏰ <b>Task Expired:</b>\nYour assigned task #{task_id} (<code>{email_str}</code>) has expired after 23 hours 30 minutes due to lifetime limit reached."[cite: 1]
+                if assigned_u:
+                    user_notice = f"⏰ <b>Task Expired:</b>\nYour assigned task #{task_id} (<code>{email_str}</code>) has expired after 23 hours 30 minutes due to lifetime limit reached."
                     asyncio.create_task(send_user_notification(
                         assigned_u, 
                         user_notice, 
                         reply_markup=get_main_menu_keyboard(), 
                         parse_mode=ParseMode.HTML
-                    ))[cite: 1]
+                    ))
 
         except Exception as e:
-            print(f"Error in background task: {e}")[cite: 1]
+            print(f"Error in background task: {e}")
             
-        await asyncio.sleep(60)[cite: 1]
+        await asyncio.sleep(60)
 
 # ============================================
 # LONG POLLING INITIALIZER WITH FLASK THREAD
 # ============================================
 
 async def main():
-    await init_db()[cite: 1]
-    await load_settings_and_cache()[cite: 1]
-    asyncio.create_task(auto_expire_tasks())[cite: 1]
+    await init_db()
+    await load_settings_and_cache()
+    asyncio.create_task(auto_expire_tasks())
     
-    server_thread = Thread(target=run_flask)[cite: 1]
-    server_thread.daemon = True[cite: 1]
-    server_thread.start()[cite: 1]
+    server_thread = Thread(target=run_flask)
+    server_thread.daemon = True
+    server_thread.start()
     
-    print('🤖 Bot connected to Supabase PostgreSQL and polling 24/7 on Render...')[cite: 1]
-    await dp.start_polling(bot)[cite: 1]
+    print('🤖 Bot connected to Supabase PostgreSQL and polling 24/7 on Render...')
+    await dp.start_polling(bot)
 
 if __name__ == '__main__':
-    asyncio.run(main())[cite: 1]
+    asyncio.run(main())
