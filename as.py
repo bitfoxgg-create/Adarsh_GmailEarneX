@@ -74,10 +74,9 @@ ULTRA_TOKEN = "niJeDFHRIN9ONCwxGparqUp0degHIpjHu0w3pprXok"
 ULTRA_KEY = "DL6mlu7DBRSR8odXWGG5"
 
 # VALIDATOR CONFIGURATION
-EMAILABLE_API_KEY = "05FXQPo7bT7K2ZtZ"
+EMAILABLE_API_KEY = "netnit_EFo0B5lNYvUsZJ5eHMxX4SBNvT12Uq71"
 VALIDATOR_ENABLED = True     # True = Active, False = Deactivated
-NETNIT_API_KEY = os.environ.get("NETNIT_API_KEY", "")
-VALIDATOR_PROVIDER = "myemailverifier"  # "myemailverifier", "emailable", or "netnit"
+VALIDATOR_PROVIDER = "netnit"  # "netnit", "myemailverifier", or "emailable"
 
 # IN-MEMORY SPEED CACHES
 JOINED_CACHE = {}     # {user_id: timestamp_joined}
@@ -120,55 +119,29 @@ def generate_random_password(length: int = 12) -> str:
 # ============================================
 
 def get_provider_url() -> str:
-    if VALIDATOR_PROVIDER == "emailable":
-        return "https://api.emailable.com/v1/verify?email={email}&api_key={key}"
     if VALIDATOR_PROVIDER == "netnit":
         return "https://apikey.netnit.net/fastcheck"
+    elif VALIDATOR_PROVIDER == "emailable":
+        return "https://api.emailable.com/v1/verify?email={email}&api_key={key}"
     return "https://api.myemailverifier.com/api/validate_single.php?apikey={key}&email={email}"
-
-
-def _netnit_result_is_valid(data) -> bool:
-    """Parse common NetNit fastcheck validity fields without assuming one response shape."""
-    positive_values = {"valid", "true", "1", "yes", "ok", "deliverable", "exists", "active", "found", "success"}
-    validity_keys = {
-        "valid", "is_valid", "exists", "is_exists", "exist", "registered",
-        "is_registered", "deliverable", "is_deliverable", "active", "is_active",
-        "verified", "is_verified", "status"
-    }
-
-    def walk(value):
-        if isinstance(value, dict):
-            for key, val in value.items():
-                key_l = str(key).strip().lower().replace("-", "_")
-                if key_l in validity_keys:
-                    if isinstance(val, bool) and val:
-                        return True
-                    if isinstance(val, (int, float)) and val == 1:
-                        return True
-                    if isinstance(val, str) and val.strip().lower() in positive_values:
-                        return True
-                if isinstance(val, (dict, list)) and walk(val):
-                    return True
-        elif isinstance(value, list):
-            return any(walk(item) for item in value)
-        return False
-
-    return walk(data)
-
 
 async def is_gmail_registered(email: str, user_id: int = None) -> bool:
     if not VALIDATOR_ENABLED:
         return True
 
     email = email.strip().lower()
+    
     if not email.endswith("@gmail.com"):
         return False
 
     username = email[:-10]
+
     if len(username) < 6 or len(username) > 30:
         return False
+
     if not re.match(r'^[a-z0-9.]+$', username):
         return False
+
     if username.startswith('.') or username.endswith('.') or '..' in username:
         return False
 
@@ -184,64 +157,58 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
             pass
 
     is_valid_email = False
+
     try:
-        timeout = aiohttp.ClientTimeout(total=12.0)
         async with aiohttp.ClientSession() as session:
             if VALIDATOR_PROVIDER == "netnit":
-                if not NETNIT_API_KEY:
-                    print("NetNit API key is not configured. Set NETNIT_API_KEY in the environment or use Change Key in the validator menu.")
-                else:
-                    url = "https://apikey.netnit.net/fastcheck"
-                    headers = {
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {NETNIT_API_KEY}"
-                    }
-                    payload = {"mail": [email]}
-                    async with session.post(url, json=payload, headers=headers, timeout=timeout) as resp:
-                        raw_text = await resp.text()
-                        if resp.status == 200:
-                            try:
-                                data = json.loads(raw_text)
-                            except (json.JSONDecodeError, TypeError):
-                                data = None
-                            if data is not None:
-                                is_valid_email = _netnit_result_is_valid(data)
-                        else:
-                            print(f"Validator HTTP Error (netnit): {resp.status} - {raw_text[:500]}")
-
-            elif VALIDATOR_PROVIDER == "emailable":
-                url = f"https://api.emailable.com/v1/verify?email={urllib.parse.quote(email)}&api_key={urllib.parse.quote(EMAILABLE_API_KEY)}"
-                async with session.get(url, timeout=timeout) as resp:
+                url = "https://apikey.netnit.net/fastcheck"
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {EMAILABLE_API_KEY}"
+                }
+                payload = {
+                    "mail": [email]
+                }
+                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=12.0)) as resp:
                     if resp.status == 200:
-                        raw_text = await resp.text()
-                        try:
-                            data = json.loads(raw_text) if isinstance(raw_text, str) else await resp.json()
-                        except Exception:
-                            data = await resp.json()
-                        if isinstance(data, dict):
-                            lower_data = {str(k).lower(): str(v).strip().lower() for k, v in data.items()}
-                            if lower_data.get("state", "") == "deliverable":
-                                is_valid_email = True
+                        data = await resp.json()
+                        results = data.get("results", [])
+                        for res in results:
+                            target_email = str(res.get("email", "")).strip().lower()
+                            if target_email == email or target_email == email.lower():
+                                if str(res.get("status", "")).strip().lower() == "good":
+                                    is_valid_email = True
+                                break
                     else:
-                        print(f"Validator HTTP Error (emailable): {resp.status}")
-
+                        print(f"Validator HTTP Error (netnit): {resp.status}")
             else:
-                url = f"https://api.myemailverifier.com/api/validate_single.php?apikey={urllib.parse.quote(EMAILABLE_API_KEY)}&email={urllib.parse.quote(email)}"
-                async with session.get(url, timeout=timeout) as resp:
+                if VALIDATOR_PROVIDER == "emailable":
+                    url = f"https://api.emailable.com/v1/verify?email={urllib.parse.quote(email)}&api_key={urllib.parse.quote(EMAILABLE_API_KEY)}"
+                else:
+                    url = f"https://api.myemailverifier.com/api/validate_single.php?apikey={urllib.parse.quote(EMAILABLE_API_KEY)}&email={urllib.parse.quote(email)}"
+
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=12.0)) as resp:
                     if resp.status == 200:
                         raw_text = await resp.text()
                         try:
                             data = json.loads(raw_text) if isinstance(raw_text, str) else await resp.json()
                         except Exception:
                             data = await resp.json()
+
                         if isinstance(data, dict):
                             lower_data = {str(k).lower(): str(v).strip().lower() for k, v in data.items()}
-                            status_val = lower_data.get("status") or lower_data.get("addressstatus") or lower_data.get("statuscode") or ""
-                            diagnosis_val = lower_data.get("diagnosis", "")
-                            if status_val in ["valid", "1", "deliverable", "ok", "true"] or "exists" in diagnosis_val or "active" in diagnosis_val:
-                                is_valid_email = True
+
+                            if VALIDATOR_PROVIDER == "emailable":
+                                state = lower_data.get("state", "")
+                                if state == "deliverable":
+                                    is_valid_email = True
+                            else:
+                                status_val = lower_data.get("status") or lower_data.get("addressstatus") or lower_data.get("statuscode") or ""
+                                diagnosis_val = lower_data.get("diagnosis", "")
+                                if status_val in ["valid", "1", "deliverable", "ok", "true"] or "exists" in diagnosis_val or "active" in diagnosis_val:
+                                    is_valid_email = True
                     else:
-                        print(f"Validator HTTP Error (myemailverifier): {resp.status}")
+                        print(f"Validator HTTP Error ({VALIDATOR_PROVIDER}): {resp.status}")
     except Exception as e:
         print(f"Validator Exception ({VALIDATOR_PROVIDER}): {e}")
 
@@ -250,6 +217,7 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
             await verify_msg.delete()
         except Exception:
             pass
+
     return is_valid_email
 
 # ============================================
@@ -456,7 +424,7 @@ async def init_db():
         await conn.execute("ALTER TABLE worker_permissions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, NETNIT_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
     global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS, DEFAULT_TASK_PASS_STATUS, UPI_FEES, USDT_FEES, ULTRA_FEES, ULTRA_TOKEN, ULTRA_KEY
     
     async with db_pool.acquire() as conn:
@@ -487,10 +455,6 @@ async def load_settings_and_cache():
         key_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='emailable_api_key'")
         if key_val:
             EMAILABLE_API_KEY = key_val
-
-        netnit_key_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='netnit_api_key'")
-        if netnit_key_val:
-            NETNIT_API_KEY = netnit_key_val
 
         val_enabled = await conn.fetchval("SELECT value FROM bot_settings WHERE key='validator_enabled'")
         VALIDATOR_ENABLED = (val_enabled != 'off')
@@ -2726,14 +2690,19 @@ async def admin_btn_validator_menu(message: Message, state: FSMContext):
     await state.clear()
     
     val_status_str = "🟢 <b>Active</b>" if VALIDATOR_ENABLED else "🔴 <b>Deactivated</b>"
-    provider_name = {"emailable": "Emailable", "myemailverifier": "MyEmailVerifier", "netnit": "NetNit"}.get(VALIDATOR_PROVIDER, VALIDATOR_PROVIDER)
+    if VALIDATOR_PROVIDER == "netnit":
+        provider_name = "NetNit (FastCheck)"
+    elif VALIDATOR_PROVIDER == "emailable":
+        provider_name = "Emailable"
+    else:
+        provider_name = "MyEmailVerifier"
     provider_url = get_provider_url()
 
     text = (
         f"⚙️ <b>Gmail Validator Management</b>\n\n"
         f"🌐 <b>Current Provider:</b> <code>{provider_name}</code>\n"
         f"🔗 <b>Provider Endpoint:</b> <code>{provider_url}</code>\n"
-        f"🔑 <b>Current API Key:</b> <code>{NETNIT_API_KEY if VALIDATOR_PROVIDER == "netnit" else EMAILABLE_API_KEY}</code>\n"
+        f"🔑 <b>Current API Key:</b> <code>{EMAILABLE_API_KEY}</code>\n"
         f"📌 <b>Validator Status:</b> {val_status_str}\n\n"
         f"Use the buttons below to configure the email validator:"
     )
@@ -2751,14 +2720,19 @@ async def cb_admin_validator_toggle_status(call: CallbackQuery):
         await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('validator_enabled', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_val)
 
     status_text = "🟢 <b>Active</b>" if VALIDATOR_ENABLED else "🔴 <b>Deactivated</b>"
-    provider_name = {"emailable": "Emailable", "myemailverifier": "MyEmailVerifier", "netnit": "NetNit"}.get(VALIDATOR_PROVIDER, VALIDATOR_PROVIDER)
+    if VALIDATOR_PROVIDER == "netnit":
+        provider_name = "NetNit (FastCheck)"
+    elif VALIDATOR_PROVIDER == "emailable":
+        provider_name = "Emailable"
+    else:
+        provider_name = "MyEmailVerifier"
     provider_url = get_provider_url()
 
     text = (
         f"⚙️ <b>Gmail Validator Management</b>\n\n"
         f"🌐 <b>Current Provider:</b> <code>{provider_name}</code>\n"
         f"🔗 <b>Provider Endpoint:</b> <code>{provider_url}</code>\n"
-        f"🔑 <b>Current API Key:</b> <code>{NETNIT_API_KEY if VALIDATOR_PROVIDER == "netnit" else EMAILABLE_API_KEY}</code>\n"
+        f"🔑 <b>Current API Key:</b> <code>{EMAILABLE_API_KEY}</code>\n"
         f"📌 <b>Validator Status:</b> {status_text}\n\n"
         f"Use the buttons below to configure the email validator:"
     )
@@ -2771,18 +2745,23 @@ async def cb_admin_validator_toggle_status(call: CallbackQuery):
 @dp.callback_query(F.data == "admin_validator_change_provider")
 async def cb_admin_validator_change_provider(call: CallbackQuery):
     global VALIDATOR_PROVIDER
-    provider_cycle = {
-        "myemailverifier": "emailable",
-        "emailable": "netnit",
-        "netnit": "myemailverifier"
-    }
-    VALIDATOR_PROVIDER = provider_cycle.get(VALIDATOR_PROVIDER, "myemailverifier")
+    if VALIDATOR_PROVIDER == "netnit":
+        VALIDATOR_PROVIDER = "myemailverifier"
+    elif VALIDATOR_PROVIDER == "myemailverifier":
+        VALIDATOR_PROVIDER = "emailable"
+    else:
+        VALIDATOR_PROVIDER = "netnit"
 
     async with db_pool.acquire() as conn:
         await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('validator_provider', $1) ON CONFLICT (key) DO UPDATE SET value = $1", VALIDATOR_PROVIDER)
 
     status_text = "🟢 <b>Active</b>" if VALIDATOR_ENABLED else "🔴 <b>Deactivated</b>"
-    provider_name = {"emailable": "Emailable", "myemailverifier": "MyEmailVerifier", "netnit": "NetNit"}.get(VALIDATOR_PROVIDER, VALIDATOR_PROVIDER)
+    if VALIDATOR_PROVIDER == "netnit":
+        provider_name = "NetNit (FastCheck)"
+    elif VALIDATOR_PROVIDER == "emailable":
+        provider_name = "Emailable"
+    else:
+        provider_name = "MyEmailVerifier"
     provider_url = get_provider_url()
 
     await call.answer(f"Switched provider to {provider_name}!", show_alert=True)
@@ -2791,7 +2770,7 @@ async def cb_admin_validator_change_provider(call: CallbackQuery):
         f"⚙️ <b>Gmail Validator Management</b>\n\n"
         f"🌐 <b>Current Provider:</b> <code>{provider_name}</code>\n"
         f"🔗 <b>Provider Endpoint:</b> <code>{provider_url}</code>\n"
-        f"🔑 <b>Current API Key:</b> <code>{NETNIT_API_KEY if VALIDATOR_PROVIDER == "netnit" else EMAILABLE_API_KEY}</code>\n"
+        f"🔑 <b>Current API Key:</b> <code>{EMAILABLE_API_KEY}</code>\n"
         f"📌 <b>Validator Status:</b> {status_text}\n\n"
         f"Use the buttons below to configure the email validator:"
     )
@@ -2804,7 +2783,12 @@ async def cb_admin_validator_change_provider(call: CallbackQuery):
 @dp.callback_query(F.data == "admin_validator_change_key")
 async def cb_admin_validator_change_key(call: CallbackQuery, state: FSMContext):
     await call.answer()
-    provider_name = {"emailable": "Emailable", "myemailverifier": "MyEmailVerifier", "netnit": "NetNit"}.get(VALIDATOR_PROVIDER, VALIDATOR_PROVIDER)
+    if VALIDATOR_PROVIDER == "netnit":
+        provider_name = "NetNit (FastCheck)"
+    elif VALIDATOR_PROVIDER == "emailable":
+        provider_name = "Emailable"
+    else:
+        provider_name = "MyEmailVerifier"
 
     await state.set_state(AdminState.waiting_for_validator_key)
     await call.message.answer(
@@ -2814,20 +2798,20 @@ async def cb_admin_validator_change_key(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_validator_key, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_change_validator_key(message: Message, state: FSMContext):
-    global EMAILABLE_API_KEY, NETNIT_API_KEY
+    global EMAILABLE_API_KEY
     new_key = message.text.strip()
 
-    provider_name = {"emailable": "Emailable", "myemailverifier": "MyEmailVerifier", "netnit": "NetNit"}.get(VALIDATOR_PROVIDER, VALIDATOR_PROVIDER)
-
-    if VALIDATOR_PROVIDER == "netnit":
-        NETNIT_API_KEY = new_key
-        settings_key = "netnit_api_key"
-    else:
-        EMAILABLE_API_KEY = new_key
-        settings_key = "emailable_api_key"
+    EMAILABLE_API_KEY = new_key
 
     async with db_pool.acquire() as conn:
-        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2", settings_key, new_key)
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('emailable_api_key', $1) ON CONFLICT (key) DO UPDATE SET value = $1", new_key)
+
+    if VALIDATOR_PROVIDER == "netnit":
+        provider_name = "NetNit (FastCheck)"
+    elif VALIDATOR_PROVIDER == "emailable":
+        provider_name = "Emailable"
+    else:
+        provider_name = "MyEmailVerifier"
 
     await message.answer(
         f"✅ <b>{provider_name} API Key Updated Successfully!</b>\n\n"
@@ -5019,12 +5003,12 @@ async def handle_task_submission(message: Message, state: FSMContext):
         return
 
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
+        await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)[cite: 1]
 
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text='Approve', callback_data=f'ta:{task_id}', icon_custom_emoji_id="6217663806110175239", style="success"),
         InlineKeyboardButton(text='Decline', callback_data=f'td:{task_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
-    ]])
+    ]])[cite: 1]
 
     admin_msg_text = (
         f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>Task Submission #{task_id}</b>\n\n'
@@ -5032,52 +5016,52 @@ async def handle_task_submission(message: Message, state: FSMContext):
         f'📧 <b>Email:</b>\n<code>{email}</code>\n\n'
         f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b>\n<code>{password}</code>\n\n'
         f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}'
-    )
+    )[cite: 1]
 
     if message.photo:
-        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_msg_text, reply_markup=admin_kb, parse_mode=ParseMode.HTML)
+        await bot.send_photo(ADMIN_ID, photo=message.photo[-1].file_id, caption=admin_msg_text, reply_markup=admin_kb, parse_mode=ParseMode.HTML)[cite: 1]
     else:
-        proof_text = f"\n\nProof: {message.text}"
-        await bot.send_message(ADMIN_ID, admin_msg_text + proof_text, reply_markup=admin_kb, parse_mode=ParseMode.HTML)
+        proof_text = f"\n\nProof: {message.text}"[cite: 1]
+        await bot.send_message(ADMIN_ID, admin_msg_text + proof_text, reply_markup=admin_kb, parse_mode=ParseMode.HTML)[cite: 1]
 
-    if added_by_worker and str(added_by_worker) != str(ADMIN_ID):
-        if WORKER_BOT_TOKEN:
+    if added_by_worker and str(added_by_worker) != str(ADMIN_ID):[cite: 1]
+        if WORKER_BOT_TOKEN:[cite: 1]
             async def send_worker_alert():
                 try:
-                    w_bot = Bot(token=WORKER_BOT_TOKEN)
+                    w_bot = Bot(token=WORKER_BOT_TOKEN)[cite: 1]
                     worker_kb = InlineKeyboardMarkup(inline_keyboard=[[
                         InlineKeyboardButton(text="Approve", callback_data=f"w_ta:{task_id}", icon_custom_emoji_id="6217663806110175239", style="success"),
                         InlineKeyboardButton(text="Decline", callback_data=f"w_td:{task_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
-                    ]])
+                    ]])[cite: 1]
                     worker_msg_text = (
                         f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>New Task Submission #{task_id}</b>\n\n'
                         f'📧 <b>Email:</b>\n<code>{email}</code>\n\n'
                         f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b>\n<code>{password}</code>'
-                    )
+                    )[cite: 1]
                     
-                    if message.photo:
-                        photo_id = message.photo[-1].file_id
-                        if message.caption:
-                            worker_msg_text += f"\n\n📝 <b>Proof:</b> {message.caption}"
-                        await w_bot.send_photo(added_by_worker, photo=photo_id, caption=worker_msg_text, reply_markup=worker_kb, parse_mode=ParseMode.HTML)
+                    if message.photo:[cite: 1]
+                        photo_id = message.photo[-1].file_id[cite: 1]
+                        if message.caption:[cite: 1]
+                            worker_msg_text += f"\n\n📝 <b>Proof:</b> {message.caption}"[cite: 1]
+                        await w_bot.send_photo(added_by_worker, photo=photo_id, caption=worker_msg_text, reply_markup=worker_kb, parse_mode=ParseMode.HTML)[cite: 1]
                     else:
-                        worker_msg_text += f"\n\n📝 <b>Proof:</b> {message.text}"
-                        await w_bot.send_message(added_by_worker, worker_msg_text, reply_markup=worker_kb, parse_mode=ParseMode.HTML)
+                        worker_msg_text += f"\n\n📝 <b>Proof:</b> {message.text}"[cite: 1]
+                        await w_bot.send_message(added_by_worker, worker_msg_text, reply_markup=worker_kb, parse_mode=ParseMode.HTML)[cite: 1]
                     
-                    await w_bot.session.close()
+                    await w_bot.session.close()[cite: 1]
                 except Exception as err:
-                    print(f"Error sending worker real-time submission alert: {err}")
+                    print(f"Error sending worker real-time submission alert: {err}")[cite: 1]
 
-            asyncio.create_task(send_worker_alert())
+            asyncio.create_task(send_worker_alert())[cite: 1]
 
     sent_msg = await message.answer(
         f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Task #{task_id} submission sent for review.\n\n'
         f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
         reply_markup=get_main_menu_keyboard(), 
         parse_mode=ParseMode.HTML
-    )
-    await state.clear()
-    await state.update_data(last_menu_msg_id=sent_msg.message_id)
+    )[cite: 1]
+    await state.clear()[cite: 1]
+    await state.update_data(last_menu_msg_id=sent_msg.message_id)[cite: 1]
 
 # ============================================
 # UNIFIED SELL APPROVE & DECLINE HANDLERS
@@ -5085,107 +5069,107 @@ async def handle_task_submission(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("sa:"))
 async def approve_sell_unified(call: CallbackQuery):
-    sell_id = int(call.data.split(":")[1])
+    sell_id = int(call.data.split(":")[1])[cite: 1]
 
     async with db_pool.acquire() as conn:
-        sell_data = await conn.fetchrow("SELECT user_id, amount, status FROM pending_sells WHERE id=$1", sell_id)
-        if not sell_data or sell_data['status'] != 'pending_review':
-            await call.answer("⚠️ This request is already processed!", show_alert=True)
+        sell_data = await conn.fetchrow("SELECT user_id, amount, status FROM pending_sells WHERE id=$1", sell_id)[cite: 1]
+        if not sell_data or sell_data['status'] != 'pending_review':[cite: 1]
+            await call.answer("⚠️ This request is already processed!", show_alert=True)[cite: 1]
             return
 
-        await call.answer()
-        user_id = sell_data['user_id']
-        amount = sell_data['amount']
+        await call.answer()[cite: 1]
+        user_id = sell_data['user_id'][cite: 1]
+        amount = sell_data['amount'][cite: 1]
 
-        await ensure_user(user_id, conn=conn)
+        await ensure_user(user_id, conn=conn)[cite: 1]
 
         async with conn.transaction():
-            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", amount, user_id)
-            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, f"Gmail sell #{sell_id} approved")
-            await conn.execute("UPDATE pending_sells SET status='approved' WHERE id=$1", sell_id)
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", amount, user_id)[cite: 1]
+            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, f"Gmail sell #{sell_id} approved")[cite: 1]
+            await conn.execute("UPDATE pending_sells SET status='approved' WHERE id=$1", sell_id)[cite: 1]
 
-            referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
+            referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)[cite: 1]
 
-        if REF_STATUS and referred_by and referred_by != user_id:
-            await ensure_user(referred_by, conn=conn)
-            ref_reward = REFERRAL_SELL_BONUS
+        if REF_STATUS and referred_by and referred_by != user_id:[cite: 1]
+            await ensure_user(referred_by, conn=conn)[cite: 1]
+            ref_reward = REFERRAL_SELL_BONUS[cite: 1]
             async with conn.transaction():
-                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
-                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
+                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)[cite: 1]
+                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")[cite: 1]
             
-            invalidate_user_cache(referred_by)
+            invalidate_user_cache(referred_by)[cite: 1]
             
             async def notify_ref():
-                ref_user_data = await get_user_data(referred_by)
-                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
+                ref_user_data = await get_user_data(referred_by)[cite: 1]
+                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])[cite: 1]
                 notif_text = (
                     f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> sell gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
-                )
-                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
+                )[cite: 1]
+                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)[cite: 1]
             
-            asyncio.create_task(notify_ref())
+            asyncio.create_task(notify_ref())[cite: 1]
 
-    invalidate_user_cache(user_id)
-    await edit_admin_message(call, '✅ Sell Request Approved')
+    invalidate_user_cache(user_id)[cite: 1]
+    await edit_admin_message(call, '✅ Sell Request Approved')[cite: 1]
     
     async def notify_user():
-        user_data = await get_user_data(user_id)
-        formatted_amt = format_currency(amount, user_data['currency'])
-        await send_user_notification(user_id, f"🎉 Your Gmail sell request #{sell_id} was approved!\n+{formatted_amt} added to your balance.")
+        user_data = await get_user_data(user_id)[cite: 1]
+        formatted_amt = format_currency(amount, user_data['currency'])[cite: 1]
+        await send_user_notification(user_id, f"🎉 Your Gmail sell request #{sell_id} was approved!\n+{formatted_amt} added to your balance.")[cite: 1]
 
-    asyncio.create_task(notify_user())
+    asyncio.create_task(notify_user())[cite: 1]
 
 @dp.callback_query(F.data.startswith("sd:"))
 async def decline_sell_unified(call: CallbackQuery, state: FSMContext):
-    sell_id = int(call.data.split(":")[1])
+    sell_id = int(call.data.split(":")[1])[cite: 1]
 
     async with db_pool.acquire() as conn:
-        sell_data = await conn.fetchrow("SELECT user_id, status FROM pending_sells WHERE id=$1", sell_id)
-        if not sell_data or sell_data['status'] != 'pending_review':
-            await call.answer("⚠️ This request is already processed!", show_alert=True)
+        sell_data = await conn.fetchrow("SELECT user_id, status FROM pending_sells WHERE id=$1", sell_id)[cite: 1]
+        if not sell_data or sell_data['status'] != 'pending_review':[cite: 1]
+            await call.answer("⚠️ This request is already processed!", show_alert=True)[cite: 1]
             return
-        user_id = sell_data['user_id']
+        user_id = sell_data['user_id'][cite: 1]
 
-    await call.answer()
-    await state.set_state(AdminState.waiting_for_sell_reject_reason)
+    await call.answer()[cite: 1]
+    await state.set_state(AdminState.waiting_for_sell_reject_reason)[cite: 1]
     await state.update_data(
         sell_id=sell_id,
         user_id=user_id, 
         admin_msg_id=call.message.message_id,
         is_photo=bool(call.message.photo)
-    )
-    await call.message.answer('<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining this sell request:</b>', parse_mode=ParseMode.HTML)
+    )[cite: 1]
+    await call.message.answer('<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining this sell request:</b>', parse_mode=ParseMode.HTML)[cite: 1]
 
 @dp.message(AdminState.waiting_for_sell_reject_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_reject_reason(message: Message, state: FSMContext):
-    data = await state.get_data()
-    sell_id = data.get('sell_id')
-    user_id = data['user_id']
-    admin_msg_id = data['admin_msg_id']
-    is_photo = data['is_photo']
-    reason = message.text.strip()
+    data = await state.get_data()[cite: 1]
+    sell_id = data.get('sell_id')[cite: 1]
+    user_id = data['user_id'][cite: 1]
+    admin_msg_id = data['admin_msg_id'][cite: 1]
+    is_photo = data['is_photo'][cite: 1]
+    reason = message.text.strip()[cite: 1]
 
-    if sell_id:
+    if sell_id:[cite: 1]
         async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE pending_sells SET status='declined' WHERE id=$1", sell_id)
+            await conn.execute("UPDATE pending_sells SET status='declined' WHERE id=$1", sell_id)[cite: 1]
 
-    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Sell request declined.</b>\n<b>Reason:</b> {reason}'
+    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Sell request declined.</b>\n<b>Reason:</b> {reason}'[cite: 1]
     try:
-        if is_photo:
-            await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
+        if is_photo:[cite: 1]
+            await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)[cite: 1]
         else:
-            await bot.edit_message_text(chat_id=message.chat.id, message_id=admin_msg_id, text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
+            await bot.edit_message_text(chat_id=message.chat.id, message_id=admin_msg_id, text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)[cite: 1]
     except Exception as e:
-        print(f"Error editing admin msg: {e}")
+        print(f"Error editing admin msg: {e}")[cite: 1]
 
     asyncio.create_task(send_user_notification(
         user_id, 
         f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request #{sell_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}', 
         parse_mode=ParseMode.HTML
-    ))
+    ))[cite: 1]
 
-    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason sent to user.', parse_mode=ParseMode.HTML)
-    await state.clear()
+    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason sent to user.', parse_mode=ParseMode.HTML)[cite: 1]
+    await state.clear()[cite: 1]
 
 # ============================================
 # TASK APPROVE & DECLINE HANDLERS
@@ -5193,123 +5177,123 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("ta:"))
 async def approve_task(call: CallbackQuery):
-    task_id = int(call.data.split(":")[1])
+    task_id = int(call.data.split(":")[1])[cite: 1]
     
     async with db_pool.acquire() as conn:
-        task_data = await conn.fetchrow("SELECT reward, status, details FROM tasks WHERE id=$1", task_id)
-        if not task_data or task_data['status'] != 'pending_review':
-            await call.answer("⚠️ This request is already processed!", show_alert=True)
+        task_data = await conn.fetchrow("SELECT reward, status, details FROM tasks WHERE id=$1", task_id)[cite: 1]
+        if not task_data or task_data['status'] != 'pending_review':[cite: 1]
+            await call.answer("⚠️ This request is already processed!", show_alert=True)[cite: 1]
             return
 
-        await call.answer()
-        reward = task_data['reward']
-        assigned_user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
-        if not assigned_user_id:
+        await call.answer()[cite: 1]
+        reward = task_data['reward'][cite: 1]
+        assigned_user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)[cite: 1]
+        if not assigned_user_id:[cite: 1]
             return
 
-        user_id = assigned_user_id
+        user_id = assigned_user_id[cite: 1]
         try:
-            task_email = task_data['details'].split(" | ")[0].replace("Email: ", "").strip()
+            task_email = task_data['details'].split(" | ")[0].replace("Email: ", "").strip()[cite: 1]
         except Exception:
-            task_email = "Task Account"
+            task_email = "Task Account"[cite: 1]
 
-        await ensure_user(user_id, conn=conn)
+        await ensure_user(user_id, conn=conn)[cite: 1]
 
         async with conn.transaction():
-            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", reward, user_id)
-            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "task", reward, f"{task_email} #{task_id}")
-            await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
-            await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", reward, user_id)[cite: 1]
+            await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "task", reward, f"{task_email} #{task_id}")[cite: 1]
+            await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)[cite: 1]
+            await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)[cite: 1]
 
-            referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
+            referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)[cite: 1]
 
-        if REF_STATUS and referred_by and referred_by != user_id:
-            await ensure_user(referred_by, conn=conn)
-            ref_reward = REFERRAL_TASK_BONUS
+        if REF_STATUS and referred_by and referred_by != user_id:[cite: 1]
+            await ensure_user(referred_by, conn=conn)[cite: 1]
+            ref_reward = REFERRAL_TASK_BONUS[cite: 1]
             async with conn.transaction():
-                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)
-                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")
+                await conn.execute("UPDATE users SET balance = balance + $1, referral_earnings = referral_earnings + $1 WHERE user_id=$2", ref_reward, referred_by)[cite: 1]
+                await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", referred_by, "referral", ref_reward, f"Referral reward from User #{user_id}")[cite: 1]
             
-            invalidate_user_cache(referred_by)
+            invalidate_user_cache(referred_by)[cite: 1]
 
             async def notify_ref():
-                ref_user_data = await get_user_data(referred_by)
-                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
+                ref_user_data = await get_user_data(referred_by)[cite: 1]
+                ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])[cite: 1]
                 notif_text = (
                     f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> task gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
-                )
-                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
+                )[cite: 1]
+                await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)[cite: 1]
 
-            asyncio.create_task(notify_ref())
+            asyncio.create_task(notify_ref())[cite: 1]
             
-    invalidate_user_cache(user_id)
-    await edit_admin_message(call, '✅ Task Approved')
+    invalidate_user_cache(user_id)[cite: 1]
+    await edit_admin_message(call, '✅ Task Approved')[cite: 1]
 
     async def notify_user():
-        user_data = await get_user_data(user_id)
-        formatted_reward = format_currency(reward, user_data['currency'])
-        await send_user_notification(user_id, f"🎉 Task #{task_id} approved!\n+{formatted_reward} added to your balance.")
+        user_data = await get_user_data(user_id)[cite: 1]
+        formatted_reward = format_currency(reward, user_data['currency'])[cite: 1]
+        await send_user_notification(user_id, f"🎉 Task #{task_id} approved!\n+{formatted_reward} added to your balance.")[cite: 1]
 
-    asyncio.create_task(notify_user())
+    asyncio.create_task(notify_user())[cite: 1]
 
 @dp.callback_query(F.data.startswith("td:"))
 async def decline_task(call: CallbackQuery, state: FSMContext):
-    task_id = int(call.data.split(":")[1])
+    task_id = int(call.data.split(":")[1])[cite: 1]
 
     async with db_pool.acquire() as conn:
-        task_data = await conn.fetchrow("SELECT status FROM tasks WHERE id=$1", task_id)
-        if not task_data or task_data['status'] != 'pending_review':
-            await call.answer("⚠️ This request is already processed!", show_alert=True)
+        task_data = await conn.fetchrow("SELECT status FROM tasks WHERE id=$1", task_id)[cite: 1]
+        if not task_data or task_data['status'] != 'pending_review':[cite: 1]
+            await call.answer("⚠️ This request is already processed!", show_alert=True)[cite: 1]
             return
 
-        user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
+        user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)[cite: 1]
 
-    if not user_id:
+    if not user_id:[cite: 1]
         return
 
-    await call.answer()
-    await state.set_state(AdminState.waiting_for_task_reject_reason)
+    await call.answer()[cite: 1]
+    await state.set_state(AdminState.waiting_for_task_reject_reason)[cite: 1]
     await state.update_data(
         task_id=task_id, 
         user_id=user_id, 
         admin_msg_id=call.message.message_id,
         is_photo=bool(call.message.photo)
-    )
-    await call.message.answer(f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining Task #{task_id}:</b>', parse_mode=ParseMode.HTML)
+    )[cite: 1]
+    await call.message.answer(f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining Task #{task_id}:</b>', parse_mode=ParseMode.HTML)[cite: 1]
 
 @dp.message(AdminState.waiting_for_task_reject_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_task_reject_reason(message: Message, state: FSMContext):
-    data = await state.get_data()
-    task_id = data['task_id']
-    user_id = data['user_id']
-    admin_msg_id = data['admin_msg_id']
-    is_photo = data['is_photo']
-    reason = message.text.strip()
+    data = await state.get_data()[cite: 1]
+    task_id = data['task_id'][cite: 1]
+    user_id = data['user_id'][cite: 1]
+    admin_msg_id = data['admin_msg_id'][cite: 1]
+    is_photo = data['is_photo'][cite: 1]
+    reason = message.text.strip()[cite: 1]
 
     async with db_pool.acquire() as conn:
-        current_status = await conn.fetchval("SELECT status FROM tasks WHERE id=$1", task_id)
-        if current_status == 'pending_review':
+        current_status = await conn.fetchval("SELECT status FROM tasks WHERE id=$1", task_id)[cite: 1]
+        if current_status == 'pending_review':[cite: 1]
             async with conn.transaction():
-                await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
-                await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
+                await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)[cite: 1]
+                await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)[cite: 1]
 
-    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Task #{task_id} declined.</b>\n<b>Reason:</b> {reason}'
+    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Task #{task_id} declined.</b>\n<b>Reason:</b> {reason}'[cite: 1]
     try:
-        if is_photo:
-            await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
+        if is_photo:[cite: 1]
+            await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)[cite: 1]
         else:
-            await bot.edit_message_text(chat_id=message.chat.id, message_id=admin_msg_id, text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
+            await bot.edit_message_text(chat_id=message.chat.id, message_id=admin_msg_id, text=new_text, reply_markup=None, parse_mode=ParseMode.HTML)[cite: 1]
     except Exception as e:
-        print(f"Error editing admin msg: {e}")
+        print(f"Error editing admin msg: {e}")[cite: 1]
 
     asyncio.create_task(send_user_notification(
         user_id, 
         f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your submission for Task #{task_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}\n\n<tg-emoji emoji-id="5251203410396458957">🛡</tg-emoji> The task has been returned to the pool.', 
         parse_mode=ParseMode.HTML
-    ))
+    ))[cite: 1]
 
-    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason recorded and user notified.', parse_mode=ParseMode.HTML)
-    await state.clear()
+    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason recorded and user notified.', parse_mode=ParseMode.HTML)[cite: 1]
+    await state.clear()[cite: 1]
 
 # ============================================
 # WITHDRAWAL CALLBACKS (ADMIN SIDE)
@@ -5317,76 +5301,76 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("wp:"))
 async def pay_withdraw(call: CallbackQuery):
-    withdrawal_id = int(call.data.split(":")[1])
+    withdrawal_id = int(call.data.split(":")[1])[cite: 1]
 
     async with db_pool.acquire() as conn:
-        w_data = await conn.fetchrow("SELECT user_id, amount, status FROM withdrawals WHERE id=$1", withdrawal_id)
-        if not w_data or w_data['status'] != 'pending':
-            await call.answer("⚠️ This request is already processed!", show_alert=True)
+        w_data = await conn.fetchrow("SELECT user_id, amount, status FROM withdrawals WHERE id=$1", withdrawal_id)[cite: 1]
+        if not w_data or w_data['status'] != 'pending':[cite: 1]
+            await call.answer("⚠️ This request is already processed!", show_alert=True)[cite: 1]
             return
 
-        await call.answer()
-        user_id = w_data['user_id']
-        payout_amount = w_data['amount']
+        await call.answer()[cite: 1]
+        user_id = w_data['user_id'][cite: 1]
+        payout_amount = w_data['amount'][cite: 1]
 
         async with conn.transaction():
-            await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)
+            await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)[cite: 1]
             await conn.execute(
                 "UPDATE transactions SET type='withdrawal', note=$1 WHERE user_id=$2 AND note LIKE $3",
                 "Withdrawal paid", user_id, f"%Withdrawal #{withdrawal_id}%"
-            )
+            )[cite: 1]
 
-    invalidate_user_cache(user_id)
-    await edit_admin_message(call, '✅ Withdrawal Paid')
+    invalidate_user_cache(user_id)[cite: 1]
+    await edit_admin_message(call, '✅ Withdrawal Paid')[cite: 1]
 
     async def notify_user():
-        user_data = await get_user_data(user_id)
-        formatted_amt = format_currency(payout_amount, user_data['currency'])
-        await send_user_notification(user_id, f"🎉 Your withdrawal request of {formatted_amt} has been approved and paid!")
+        user_data = await get_user_data(user_id)[cite: 1]
+        formatted_amt = format_currency(payout_amount, user_data['currency'])[cite: 1]
+        await send_user_notification(user_id, f"🎉 Your withdrawal request of {formatted_amt} has been approved and paid!")[cite: 1]
 
-    asyncio.create_task(notify_user())
+    asyncio.create_task(notify_user())[cite: 1]
 
 @dp.callback_query(F.data.startswith("wr:"))
 async def reject_withdraw(call: CallbackQuery):
-    withdrawal_id = int(call.data.split(":")[1])
+    withdrawal_id = int(call.data.split(":")[1])[cite: 1]
     
     async with db_pool.acquire() as conn:
-        w_data = await conn.fetchrow("SELECT user_id, amount, method, status FROM withdrawals WHERE id=$1", withdrawal_id)
-        if not w_data or w_data['status'] != 'pending':
-            await call.answer("⚠️ This request is already processed!", show_alert=True)
+        w_data = await conn.fetchrow("SELECT user_id, amount, method, status FROM withdrawals WHERE id=$1", withdrawal_id)[cite: 1]
+        if not w_data or w_data['status'] != 'pending':[cite: 1]
+            await call.answer("⚠️ This request is already processed!", show_alert=True)[cite: 1]
             return
 
-        await call.answer()
-        user_id = w_data['user_id']
-        payout_amount = w_data['amount']
-        method = (w_data['method'] or 'UPI').lower()
+        await call.answer()[cite: 1]
+        user_id = w_data['user_id'][cite: 1]
+        payout_amount = w_data['amount'][cite: 1]
+        method = (w_data['method'] or 'UPI').lower()[cite: 1]
 
-        fee = UPI_FEES if 'upi' in method else (USDT_FEES if 'usdt' in method else ULTRA_FEES)
-        refund_total = payout_amount + fee
+        fee = UPI_FEES if 'upi' in method else (USDT_FEES if 'usdt' in method else ULTRA_FEES)[cite: 1]
+        refund_total = payout_amount + fee[cite: 1]
 
         async with conn.transaction():
-            await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
-            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", refund_total, user_id)
-            await conn.execute("DELETE FROM transactions WHERE user_id=$1 AND note LIKE $2", user_id, f"%Withdrawal #{withdrawal_id}%")
+            await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)[cite: 1]
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", refund_total, user_id)[cite: 1]
+            await conn.execute("DELETE FROM transactions WHERE user_id=$1 AND note LIKE $2", user_id, f"%Withdrawal #{withdrawal_id}%")[cite: 1]
             await conn.execute(
                 "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
                 user_id, "refund", refund_total, f"Refund for rejected withdrawal #{withdrawal_id}"
-            )
+            )[cite: 1]
             
-    invalidate_user_cache(user_id)
-    await edit_admin_message(call, '⚠️ Withdrawal Rejected (Balance Refunded)')
+    invalidate_user_cache(user_id)[cite: 1]
+    await edit_admin_message(call, '⚠️ Withdrawal Rejected (Balance Refunded)')[cite: 1]
     
     async def notify_user_refund():
-        user_data = await get_user_data(user_id)
-        formatted_amt = format_currency(refund_total, user_data['currency'])
+        user_data = await get_user_data(user_id)[cite: 1]
+        formatted_amt = format_currency(refund_total, user_data['currency'])[cite: 1]
         await send_user_notification(
             user_id, 
             f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request #{withdrawal_id} was rejected.\n'
             f'💰 <b>{formatted_amt}</b> has been refunded back to your balance.', 
             parse_mode=ParseMode.HTML
-        )
+        )[cite: 1]
 
-    asyncio.create_task(notify_user_refund())
+    asyncio.create_task(notify_user_refund())[cite: 1]
 
 # ============================================
 # OPTIMIZED AUTO EXPIRE TASKS ENGINE
@@ -5402,26 +5386,26 @@ async def auto_expire_tasks():
                     FROM task_assignments ta
                     JOIN tasks t ON ta.task_id = t.id
                     WHERE t.status = 'assigned'
-                ''')
+                ''')[cite: 1]
                 
-                now = datetime.utcnow()
+                now = datetime.utcnow()[cite: 1]
                 for r in rows_30m:
-                    if now - r['assigned_at'] > timedelta(minutes=30):
-                        expired_30m.append((r['task_id'], r['user_id']))
+                    if now - r['assigned_at'] > timedelta(minutes=30):[cite: 1]
+                        expired_30m.append((r['task_id'], r['user_id']))[cite: 1]
 
-                if expired_30m:
-                    task_ids_30m = [t[0] for t in expired_30m]
+                if expired_30m:[cite: 1]
+                    task_ids_30m = [t[0] for t in expired_30m][cite: 1]
                     async with conn.transaction():
-                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', task_ids_30m)
-                        await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids_30m)
+                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', task_ids_30m)[cite: 1]
+                        await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids_30m)[cite: 1]
 
-            for task_id, user_id in expired_30m:
+            for task_id, user_id in expired_30m:[cite: 1]
                 asyncio.create_task(send_user_notification(
                     user_id, 
                     f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Task #{task_id} time limit expired (30 mins).\nThe task was returned to the pool.', 
                     reply_markup=get_main_menu_keyboard(), 
                     parse_mode=ParseMode.HTML
-                ))
+                ))[cite: 1]
 
             expired_lifetime_tasks = []
             async with db_pool.acquire() as conn:
@@ -5430,67 +5414,67 @@ async def auto_expire_tasks():
                     FROM tasks t
                     LEFT JOIN task_assignments ta ON t.id = ta.task_id
                     WHERE t.status != 'completed'
-                ''')
+                ''')[cite: 1]
 
-                now = datetime.utcnow()
+                now = datetime.utcnow()[cite: 1]
                 for r in rows_lifetime:
-                    created_at = r['created_at'] or now
-                    if now - created_at > timedelta(hours=23, minutes=30):
+                    created_at = r['created_at'] or now[cite: 1]
+                    if now - created_at > timedelta(hours=23, minutes=30):[cite: 1]
                         expired_lifetime_tasks.append({
                             'id': r['id'],
                             'details': r['details'],
                             'user_id': r['user_id']
-                        })
+                        })[cite: 1]
 
-                if expired_lifetime_tasks:
-                    expired_ids = [t['id'] for t in expired_lifetime_tasks]
+                if expired_lifetime_tasks:[cite: 1]
+                    expired_ids = [t['id'] for t in expired_lifetime_tasks][cite: 1]
                     async with conn.transaction():
-                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', expired_ids)
-                        await conn.execute('DELETE FROM tasks WHERE id = ANY($1::int[])', expired_ids)
+                        await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', expired_ids)[cite: 1]
+                        await conn.execute('DELETE FROM tasks WHERE id = ANY($1::int[])', expired_ids)[cite: 1]
 
-            for item in expired_lifetime_tasks:
-                task_id = item['id']
-                assigned_u = item['user_id']
+            for item in expired_lifetime_tasks:[cite: 1]
+                task_id = item['id'][cite: 1]
+                assigned_u = item['user_id'][cite: 1]
                 try:
-                    email_str = item['details'].split(" | ")[0].replace("Email: ", "").strip()
+                    email_str = item['details'].split(" | ")[0].replace("Email: ", "").strip()[cite: 1]
                 except Exception:
-                    email_str = f"Task #{task_id}"
+                    email_str = f"Task #{task_id}"[cite: 1]
 
-                admin_notice = f"⏰ <b>Task Expiry Alert:</b>\nTask #{task_id} (<code>{email_str}</code>) expired after 23h 30m and was automatically removed."
+                admin_notice = f"⏰ <b>Task Expiry Alert:</b>\nTask #{task_id} (<code>{email_str}</code>) expired after 23h 30m and was automatically removed."[cite: 1]
                 try:
-                    await bot.send_message(ADMIN_ID, admin_notice, parse_mode=ParseMode.HTML)
+                    await bot.send_message(ADMIN_ID, admin_notice, parse_mode=ParseMode.HTML)[cite: 1]
                 except Exception:
                     pass
 
-                if assigned_u:
-                    user_notice = f"⏰ <b>Task Expired:</b>\nYour assigned task #{task_id} (<code>{email_str}</code>) has expired after 23 hours 30 minutes due to lifetime limit reached."
+                if assigned_u:[cite: 1]
+                    user_notice = f"⏰ <b>Task Expired:</b>\nYour assigned task #{task_id} (<code>{email_str}</code>) has expired after 23 hours 30 minutes due to lifetime limit reached."[cite: 1]
                     asyncio.create_task(send_user_notification(
                         assigned_u, 
                         user_notice, 
                         reply_markup=get_main_menu_keyboard(), 
                         parse_mode=ParseMode.HTML
-                    ))
+                    ))[cite: 1]
 
         except Exception as e:
-            print(f"Error in background task: {e}")
+            print(f"Error in background task: {e}")[cite: 1]
             
-        await asyncio.sleep(60)
+        await asyncio.sleep(60)[cite: 1]
 
 # ============================================
 # LONG POLLING INITIALIZER WITH FLASK THREAD
 # ============================================
 
 async def main():
-    await init_db()
-    await load_settings_and_cache()
-    asyncio.create_task(auto_expire_tasks())
+    await init_db()[cite: 1]
+    await load_settings_and_cache()[cite: 1]
+    asyncio.create_task(auto_expire_tasks())[cite: 1]
     
-    server_thread = Thread(target=run_flask)
-    server_thread.daemon = True
-    server_thread.start()
+    server_thread = Thread(target=run_flask)[cite: 1]
+    server_thread.daemon = True[cite: 1]
+    server_thread.start()[cite: 1]
     
-    print('🤖 Bot connected to Supabase PostgreSQL and polling 24/7 on Render...')
-    await dp.start_polling(bot)
+    print('🤖 Bot connected to Supabase PostgreSQL and polling 24/7 on Render...')[cite: 1]
+    await dp.start_polling(bot)[cite: 1]
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    asyncio.run(main())[cite: 1]
