@@ -261,6 +261,7 @@ class AdminState(StatesGroup):
     waiting_for_bulk_add_task = State()
     waiting_for_remove_task = State()
     waiting_for_broadcast = State()
+    waiting_for_broadcast_target = State()
     waiting_for_user_transactions = State()
     waiting_for_chat_user_id = State()
     waiting_for_chat_message = State()
@@ -326,6 +327,7 @@ async def init_db():
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'USD'")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by BIGINT DEFAULT NULL")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_earnings DOUBLE PRECISION DEFAULT 0")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
 
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS banned_users (
@@ -516,6 +518,16 @@ async def load_settings_and_cache():
 
 def invalidate_user_cache(user_id: int):
     USER_CACHE.pop(user_id, None)
+
+async def update_last_active(user_id: int):
+    try:
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE user_id=$1",
+                user_id
+            )
+    except Exception:
+        pass
 
 async def ensure_user(user_id: int, referrer_id: int = None, conn=None) -> bool:
     is_new = False
@@ -1302,6 +1314,8 @@ async def global_message_middleware(handler, event: Message, data):
 
     user_id = event.from_user.id
 
+    asyncio.create_task(update_last_active(user_id))
+
     if user_id == ADMIN_ID:
         return await handler(event, data)
         
@@ -1330,6 +1344,8 @@ async def global_callback_middleware(handler, event: CallbackQuery, data):
         return await handler(event, data)
 
     user_id = event.from_user.id
+
+    asyncio.create_task(update_last_active(user_id))
 
     if user_id == ADMIN_ID:
         return await handler(event, data)
@@ -4143,19 +4159,91 @@ async def process_broadcast_message(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
 
+    await state.update_data(
+        broadcast_chat_id=message.chat.id,
+        broadcast_message_id=message.message_id
+    )
+    await state.set_state(AdminState.waiting_for_broadcast_target)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🕐 24 Hours", callback_data="bcdur:24")
+    kb.button(text="🕑 48 Hours", callback_data="bcdur:48")
+    kb.button(text="🕒 72 Hours", callback_data="bcdur:72")
+    kb.button(text="👥 All Users", callback_data="bcdur:all")
+    kb.adjust(1)
+
+    await message.answer(
+        "📢 <b>Select the target audience for this broadcast:</b>\n\n"
+        "Choose which users (based on their last activity) should receive this message.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=kb.as_markup()
+    )
+
+@dp.callback_query(F.data.startswith("bcdur:"), AdminState.waiting_for_broadcast_target)
+async def process_broadcast_target_selection(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+
+    await call.answer()
+
+    data = await state.get_data()
+    from_chat_id = data.get("broadcast_chat_id")
+    message_id = data.get("broadcast_message_id")
+
+    if not from_chat_id or not message_id:
+        try:
+            await call.message.edit_text("⚠️ Broadcast session expired. Please start again.")
+        except Exception:
+            pass
+        await state.clear()
+        return
+
+    duration_key = call.data.split(":", 1)[1]
+
+    duration_labels = {
+        "24": "Users active in the last 24 Hours",
+        "48": "Users active in the last 48 Hours",
+        "72": "Users active in the last 72 Hours",
+        "all": "All Users"
+    }
+    label = duration_labels.get(duration_key, "All Users")
+
     async with db_pool.acquire() as conn:
-        users = await conn.fetch("SELECT user_id FROM users")
+        if duration_key == "24":
+            users = await conn.fetch("SELECT user_id FROM users WHERE last_active >= NOW() - INTERVAL '24 hours'")
+        elif duration_key == "48":
+            users = await conn.fetch("SELECT user_id FROM users WHERE last_active >= NOW() - INTERVAL '48 hours'")
+        elif duration_key == "72":
+            users = await conn.fetch("SELECT user_id FROM users WHERE last_active >= NOW() - INTERVAL '72 hours'")
+        else:
+            users = await conn.fetch("SELECT user_id FROM users")
 
     if not users:
-        await message.answer("📭 No users found in database to send broadcast.", reply_markup=get_admin_menu_keyboard())
+        try:
+            await call.message.edit_text(
+                f"📭 No users found for: <b>{label}</b>",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            pass
         await state.clear()
         return
 
     total_users = len(users)
-    status_msg = await message.answer(
-        f"⏳ <b>Broadcast in progress...</b>\nTotal targets: <b>{total_users}</b>",
-        parse_mode=ParseMode.HTML
-    )
+    try:
+        status_msg = await call.message.edit_text(
+            f"⏳ <b>Broadcast in progress...</b>\n"
+            f"🎯 Target: <b>{label}</b>\n"
+            f"Total targets: <b>{total_users}</b>",
+            parse_mode=ParseMode.HTML
+        )
+    except Exception:
+        status_msg = await call.message.answer(
+            f"⏳ <b>Broadcast in progress...</b>\n"
+            f"🎯 Target: <b>{label}</b>\n"
+            f"Total targets: <b>{total_users}</b>",
+            parse_mode=ParseMode.HTML
+        )
 
     success_count = 0
     fail_count = 0
@@ -4165,8 +4253,8 @@ async def process_broadcast_message(message: Message, state: FSMContext):
         try:
             await bot.copy_message(
                 chat_id=target_id,
-                from_chat_id=message.chat.id,
-                message_id=message.message_id
+                from_chat_id=from_chat_id,
+                message_id=message_id
             )
             success_count += 1
         except TelegramForbiddenError:
@@ -4177,7 +4265,8 @@ async def process_broadcast_message(message: Message, state: FSMContext):
         if idx % 20 == 0 or idx == total_users:
             try:
                 await status_msg.edit_text(
-                    f"⏳ <b>Broadcasting...</b> ({idx}/{total_users})\n\n"
+                    f"⏳ <b>Broadcasting...</b> ({idx}/{total_users})\n"
+                    f"🎯 Target: <b>{label}</b>\n\n"
                     f"🟢 Success: <b>{success_count}</b>\n"
                     f"🔴 Failed: <b>{fail_count}</b>",
                     parse_mode=ParseMode.HTML
@@ -4189,10 +4278,15 @@ async def process_broadcast_message(message: Message, state: FSMContext):
 
     await status_msg.edit_text(
         f"✅ <b>Broadcast Completed!</b>\n\n"
+        f"🎯 <b>Target:</b> {label}\n"
         f"📊 <b>Total Users Processed:</b> {total_users}\n"
         f"🟢 <b>Successfully Sent:</b> {success_count}\n"
         f"🔴 <b>Failed / Blocked:</b> {fail_count}",
-        parse_mode=ParseMode.HTML,
+        parse_mode=ParseMode.HTML
+    )
+    await bot.send_message(
+        ADMIN_ID,
+        "🏠 Back to Admin Menu",
         reply_markup=get_admin_menu_keyboard()
     )
     await state.clear()
