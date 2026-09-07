@@ -1249,7 +1249,7 @@ async def render_transaction_history_page(target_user_id: int, page: int = 1, is
 
     page_items = tx_rows[start_idx:end_idx]
 
-    header_title = f"💳 <b>Transaction History (User <code>{target_user_id}</code>)</b>" if is_admin else '<tg-emoji emoji-id="5440410042773824003">📜</tg-emoji> <b>Transaction History</b>'
+    header_title = f"💳 <b>Transaction History (User <code>{target_user_id}</code>)</b>" if is_admin else '📜 <b>Transaction History</b>'
 
     if total_items == 0:
         text = f"{header_title}\n\n📭 No transaction records found."
@@ -1329,7 +1329,7 @@ async def global_message_middleware(handler, event: Message, data):
 
     if MUST_JOIN_CHANNEL and not await check_user_joined_channel(user_id):
         await event.answer(
-            f'<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>You must join our main channel to use this bot!</b>\n\n'
+            f'❗️ <b>You must join our main channel to use this bot!</b>\n\n'
             f'Please join the channel below and click verify.',
             parse_mode=ParseMode.HTML,
             reply_markup=get_must_join_keyboard()
@@ -1386,7 +1386,7 @@ async def verify_must_join_callback(call: CallbackQuery):
         except:
             pass
         await call.message.answer(
-            f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> <b>Verification successful! You can now use the bot.</b>',
+            f'✅ <b>Verification successful! You can now use the bot.</b>',
             parse_mode=ParseMode.HTML,
             reply_markup=get_main_menu_keyboard()
         )
@@ -1403,7 +1403,7 @@ async def user_left_channel(event: ChatMemberUpdated):
     try:
         await bot.send_message(
             user_id,
-            '<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> <b>You left our official channel!</b>\n\nAccess to the bot has been paused. Rejoin the channel to use the bot again.',
+            '❗️ <b>You left our official channel!</b>\n\nAccess to the bot has been paused. Rejoin the channel to use the bot again.',
             parse_mode=ParseMode.HTML,
             reply_markup=get_must_join_keyboard()
         )
@@ -1435,14 +1435,14 @@ async def start(message: Message, state: FSMContext, command: CommandObject = No
         
         if is_new_user:
             text = (
-                '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome to Gmail Earnex!</b>\n\n'
+                '👋 <b>Welcome to Gmail Earnex!</b>\n\n'
                 '💵 <b>Default Currency Selected:</b> <code>USD ($)</code>\n'
                 '⚙️ <i>You can change your currency anytime in <b>Settings</b>.</i>\n\n'
                 'Choose an option from the menu below:'
             )
         else:
             text = (
-                '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome back.</b>\n\n'
+                '👋 <b>Welcome back.</b>\n\n'
                 'Choose an option from the menu below:'
             )
         
@@ -1455,7 +1455,7 @@ async def start(message: Message, state: FSMContext, command: CommandObject = No
 @dp.message(F.text == "🚫 Cancel", StateFilter("*"))
 async def cancel(message: Message, state: FSMContext):
     await state.clear()
-    sent_msg = await message.answer('<tg-emoji emoji-id="5274099962655816924">❗️</tg-emoji> Current operation cancelled.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+    sent_msg = await message.answer('❗️ Current operation cancelled.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
 @dp.message(F.text == "🏠 Main Menu", StateFilter("*"))
@@ -1473,7 +1473,7 @@ async def cb_menu_back(call: CallbackQuery, state: FSMContext):
     await call.answer()
     await state.clear()
     text = (
-        '<tg-emoji emoji-id="5458904472598095631">👋</tg-emoji> <b>Welcome back.</b>\n\n'
+        '👋 <b>Welcome back.</b>\n\n'
         'Choose an option from the menu below:'
     )
     try:
@@ -1511,19 +1511,19 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
     rate_task = format_currency(REFERRAL_TASK_BONUS, curr)
 
     text = (
-        f'<tg-emoji emoji-id="6183862417785626642">👥</tg-emoji> <b>My Referrals</b>\n'
+        f'👥 <b>My Referrals</b>\n'
         f'━━━━━━━━━━━━━━━━━━\n'
         f'<b>Total earnings:</b> {formatted_earnings}\n'
         f'<b>Invited users:</b> {invited_users_count}\n'
         f'<b>Approved referral accounts:</b> {approved_ref_accounts}\n'
         f'━━━━━━━━━━━━━━━━━━\n'
-        f'<tg-emoji emoji-id="5417831807720642261">ℹ️</tg-emoji> <b>How it works</b>\n'
+        f'ℹ️ <b>How it works</b>\n'
         f'Share your invite link. Every time someone you invited gets a Gmail account accepted, you earn a cash referral reward — for a lifetime. No limit, it never expires.\n\n'
-        f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Referral Rewards</b>\n'
+        f'💵 <b>Referral Rewards</b>\n'
         f'Sell Gmail accepted account: {rate_sell}\n'
         f'Task Gmail accepted account: {rate_task}\n'
         f'Paid on every accepted account from your referrals — for life.\n\n'
-        f'<tg-emoji emoji-id="5337080053119336309">🔗</tg-emoji> <b>Your invite link:</b>\n'
+        f'🔗 <b>Your invite link:</b>\n'
         f'<code>{invite_link}</code>'
     )
 
@@ -1653,12 +1653,12 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
 
     if total_items == 0:
         text = (
-            '<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>My Accounts</b>\n\n'
+            '🏷️ <b>My Accounts</b>\n\n'
             "📭 You haven't submitted any Gmail accounts yet."
         )
     else:
         text = (
-            f'<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>My Accounts</b>\n'
+            f'🏷️ <b>My Accounts</b>\n'
             f'You have <b>{total_items}</b> submitted Gmail accounts.\n'
             f'Showing <b>{start_idx + 1}-{end_idx}</b> of <b>{total_items}</b>.\n\n'
         )
@@ -1724,8 +1724,8 @@ async def cb_settings(call: CallbackQuery, state: FSMContext):
     curr = user_data['currency']
     
     text = (
-        '<tg-emoji emoji-id="5893161718179173515">⚙️</tg-emoji> <b>Settings</b>\n\n'
-        '<tg-emoji emoji-id="5902002809573740949">⚙️</tg-emoji> Customize your preferences using the options below:'
+        '⚙️ <b>Settings</b>\n\n'
+        '⚙️ Customize your preferences using the options below:'
     )
     try:
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_settings_keyboard(notif, curr))
@@ -1794,7 +1794,7 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
             
             if task_status == 'pending_review':
                 if SINGLE_TASK_STATUS:
-                    txt = '<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Your task submission is currently under admin review. Please wait for approval before taking another task.'
+                    txt = '🚀 Your task submission is currently under admin review. Please wait for approval before taking another task.'
                     try:
                         await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
                     except:
@@ -1820,12 +1820,12 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
 
                     reward_str = format_currency(existing["reward"], user_curr)
                     txt = (
-                        f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>You already have an active task.</b>\n\n'
-                        f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Your Current Task</b>\n\n'
-                        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> #{task_id}\n'
-                        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> {username} | <tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
-                        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> {reward_str}\n\n'
-                        f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Time Remaining: {mins}m {secs}s'
+                        f'⚠️ <b>You already have an active task.</b>\n\n'
+                        f'🎯 <b>Your Current Task</b>\n\n'
+                        f'✍️ #{task_id}\n'
+                        f'👤 <b>Email:</b> {username} | 🔑 <b>Password:</b> <code>{password}</code>\n'
+                        f'💰 <b>Reward:</b> {reward_str}\n\n'
+                        f'🚀 Time Remaining: {mins}m {secs}s'
                     )
                     try:
                         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
@@ -1875,10 +1875,10 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
 
     reward_str = format_currency(reward, user_curr)
     txt = (
-        f'<tg-emoji emoji-id="5310278924616356636">🎯</tg-emoji> <b>Task #{task_id}</b>\n\n'
-        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> {username} | <tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> {reward_str}\n\n'
-        f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> You have ONLY 30 MINUTES to complete this task.'
+        f'🎯 <b>Task #{task_id}</b>\n\n'
+        f'👤 <b>Email:</b> {username} | 🔑 <b>Password:</b> <code>{password}</code>\n'
+        f'💰 <b>Reward:</b> {reward_str}\n\n'
+        f'🚀 You have ONLY 30 MINUTES to complete this task.'
     )
     try:
         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
@@ -1906,13 +1906,13 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
     ultra_set = ultra != "None" and ultra != ""
     formatted_bal = format_currency(bal, curr)
     
-    ultra_line = f'\n<tg-emoji emoji-id="5195033767969839232">⚡️</tg-emoji> <b>Ultra Gateway:</b> <code>{ultra}</code>' if ULTRA_STATUS else ""
+    ultra_line = f'\n⚡️ <b>Ultra Gateway:</b> <code>{ultra}</code>' if ULTRA_STATUS else ""
     
     text = (
-        f'<tg-emoji emoji-id="5445353829304387411">💳</tg-emoji> <b>Balance</b>\n\n'
-        f'<tg-emoji emoji-id="5278467510604160626">💵</tg-emoji> <b>Available:</b> {formatted_bal}\n'
-        f'<tg-emoji emoji-id="6291696801636424911">🏦</tg-emoji> <b>UPI:</b> <code>{upi}</code>\n'
-        f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> <b>USDT BEP-20:</b> <code>{usdt}</code>'
+        f'💳 <b>Balance</b>\n\n'
+        f'💵 <b>Available:</b> {formatted_bal}\n'
+        f'🏦 <b>UPI:</b> <code>{upi}</code>\n'
+        f'🪙 <b>USDT BEP-20:</b> <code>{usdt}</code>'
         f'{ultra_line}'
     )
     
@@ -1934,8 +1934,8 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
     user_data = await get_user_data(call.from_user.id)
     rate_str = format_currency(GMAIL_SELL_RATE, user_data['currency'])
     txt = (
-        f'<tg-emoji emoji-id="5445221832074483553">🏷️</tg-emoji> <b>Sell Price {rate_str}/Gmail</b>\n\n'
-        '<tg-emoji emoji-id="5377548235709619284">🤑</tg-emoji> <b>Step 1/2:</b> Please send the Gmail <b>Username</b> (e.g., <code>example@gmail.com</code>):'
+        f'🏷️ <b>Sell Price {rate_str}/Gmail</b>\n\n'
+        '🤑 <b>Step 1/2:</b> Please send the Gmail <b>Username</b> (e.g., <code>example@gmail.com</code>):'
     )
     try:
         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
@@ -1990,7 +1990,7 @@ async def process_sell_username(message: Message, state: FSMContext):
     await state.update_data(sell_username=username)
     await state.set_state(UserState.selling_password)
     sent_msg = await message.answer(
-        '<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Step 2/2:</b> Now send the <b>Password</b> for this Gmail account:',
+        '🔑 <b>Step 2/2:</b> Now send the <b>Password</b> for this Gmail account:',
         parse_mode=ParseMode.HTML,
         reply_markup=get_back_inline_keyboard()
     )
@@ -2023,11 +2023,11 @@ async def process_sell_password(message: Message, state: FSMContext):
     ]])
 
     admin_message_text = (
-        f'<tg-emoji emoji-id="5377548235709619284">📨</tg-emoji> <b>New Gmail Sell Request #{sell_id}</b>\n\n'
-        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Seller:</b> @{message.from_user.username} (<code>{user_id}</code>)\n'
+        f'📨 <b>New Gmail Sell Request #{sell_id}</b>\n\n'
+        f'👤 <b>Seller:</b> @{message.from_user.username} (<code>{user_id}</code>)\n'
         f'📧 <b>Username:</b> <code>{username}</code>\n'
-        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Payout Rate:</b> ₹{rate:.2f}'
+        f'🔑 <b>Password:</b> <code>{password}</code>\n'
+        f'💰 <b>Payout Rate:</b> ₹{rate:.2f}'
     )
 
     await bot.send_message(
@@ -2050,7 +2050,7 @@ async def process_sell_password(message: Message, state: FSMContext):
                 current_stock = await conn.fetchval("SELECT COUNT(*) FROM pending_sells WHERE status = 'pending_review' AND claimed_by IS NULL") or 0
             
             w_msg = (
-                f'<tg-emoji emoji-id="5377548235709619284">📦</tg-emoji> <b>New Gmail Sell Request Stock!</b>\n\n'
+                f'📦 <b>New Gmail Sell Request Stock!</b>\n\n'
                 f'📊 <b>Available Stock:</b> <code>{current_stock}</code>\n\n'
                 f'Go to <b>Pending Reviews</b> to claim review tasks.'
             )
@@ -2066,8 +2066,8 @@ async def process_sell_password(message: Message, state: FSMContext):
     asyncio.create_task(alert_authorized_workers())
 
     sent_msg = await message.answer(
-        f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Your Gmail sell account details (Request #{sell_id}) have been sent for admin review.\n\n'
-        f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
+        f'✅ Your Gmail sell account details (Request #{sell_id}) have been sent for admin review.\n\n'
+        f'⚠️ <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
         reply_markup=get_main_menu_keyboard(), 
         parse_mode=ParseMode.HTML
     )
@@ -3016,7 +3016,7 @@ async def process_add_task_step(message: Message, state: FSMContext):
         kb.adjust(2)
 
         await message.answer(
-            f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>This task (<code>{username}</code>) already exists in database!</b>\n\n'
+            f'⚠️ <b>This task (<code>{username}</code>) already exists in database!</b>\n\n'
             f'Would you like to add it anyway?',
             parse_mode=ParseMode.HTML,
             reply_markup=kb.as_markup()
@@ -3039,11 +3039,11 @@ async def insert_new_task(message: Message, username: str):
         )
         
     await message.answer(
-        f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> <b>Task Added Successfully!</b>\n\n'
-        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <b>Task ID:</b> <code>#{task_id}</code>\n'
-        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>Email:</b> <code>{username}</code>\n'
-        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{default_reward}', 
+        f'✅ <b>Task Added Successfully!</b>\n\n'
+        f'✍️ <b>Task ID:</b> <code>#{task_id}</code>\n'
+        f'👤 <b>Email:</b> <code>{username}</code>\n'
+        f'🔑 <b>Password:</b> <code>{password}</code>\n'
+        f'💰 <b>Reward:</b> ₹{default_reward}', 
         parse_mode=ParseMode.HTML,
         reply_markup=get_admin_menu_keyboard()
     )
@@ -3138,7 +3138,7 @@ async def cb_admin_view_pending_sells(call: CallbackQuery):
             if "@gmail.com" not in username.lower() and "@" not in username:
                 username += "@gmail.com"
                 
-            formatted_details = f"📧 <b>Username:</b> <code>{username}</code>\n<tg-emoji emoji-id=\"6005570495603282482\">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>"
+            formatted_details = f"📧 <b>Username:</b> <code>{username}</code>\n🔑 <b>Password:</b> <code>{password}</code>"
         except Exception:
             formatted_details = f"<code>{details}</code>"
 
@@ -3150,9 +3150,9 @@ async def cb_admin_view_pending_sells(call: CallbackQuery):
         ]])
 
         await call.message.answer(
-            f'<tg-emoji emoji-id="5377548235709619284">📦</tg-emoji> <b>Pending Gmail Sell Request #{sell_id}</b>\n\n'
-            f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>User ID:</b> <code>{user_id}</code>\n'
-            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Rate:</b> ₹{amount:.2f}'
+            f'📦 <b>Pending Gmail Sell Request #{sell_id}</b>\n\n'
+            f'👤 <b>User ID:</b> <code>{user_id}</code>\n'
+            f'💰 <b>Rate:</b> ₹{amount:.2f}'
             f'{claimed_str}\n\n'
             f'📝 <b>Details:</b>\n{formatted_details}',
             reply_markup=kb,
@@ -3204,12 +3204,12 @@ async def cb_admin_view_pending_tasks(call: CallbackQuery):
         ]])
         
         await call.message.answer(
-            f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>Pending Task Submission</b>\n\n'
-            f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>User ID:</b> <code>{user_id}</code>\n'
-            f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <b>Task #{task_id}</b>\n'
+            f'📤 <b>Pending Task Submission</b>\n\n'
+            f'👤 <b>User ID:</b> <code>{user_id}</code>\n'
+            f'✍️ <b>Task #{task_id}</b>\n'
             f'📧 <b>Email:</b> <code>{email}</code>\n'
-            f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b> <code>{password}</code>\n'
-            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}',
+            f'🔑 <b>Password:</b> <code>{password}</code>\n'
+            f'💰 <b>Reward:</b> ₹{reward}',
             reply_markup=kb,
             parse_mode=ParseMode.HTML
         )
@@ -3306,13 +3306,13 @@ async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
         )
         kb.adjust(2)
 
-        address_emoji = '<tg-emoji emoji-id="6152069549442208798">🏦</tg-emoji>' if "upi" in method.lower() else ('<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji>' if "usdt" in method.lower() else '<tg-emoji emoji-id="5195033767969839232">⚡️</tg-emoji>')
+        address_emoji = '🏦' if "upi" in method.lower() else ('🪙' if "usdt" in method.lower() else '⚡️')
 
         await call.message.answer(
-            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
-            f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <b>User ID:</b> <code>{user_id}</code>\n'
+            f'💰 <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
+            f'✍️ <b>User ID:</b> <code>{user_id}</code>\n'
             f'💳 <b>Method:</b> <code>{method}</code>\n'
-            f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Amount:</b> ₹{amount:.2f}{extra_usdt_info}\n'
+            f'💰 <b>Amount:</b> ₹{amount:.2f}{extra_usdt_info}\n'
             f'{address_emoji} <b>Address:</b> <code>{payment_address}</code>\n'
             f'📅 <b>Date:</b> {r["created_at"].strftime("%Y-%m-%d %H:%M:%S")}',
             reply_markup=kb.as_markup(),
@@ -3457,7 +3457,7 @@ async def process_cancel_sell_by_id_reason_step(message: Message, state: FSMCont
         uid = r['user_id']
         asyncio.create_task(send_user_notification(
             uid,
-            f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request #{sell_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}',
+            f'⚠️ <b>Your sell request #{sell_id} was declined.</b>\n\n💬 <b>Reason:</b> {reason}',
             parse_mode=ParseMode.HTML
         ))
 
@@ -3485,7 +3485,7 @@ async def process_bulk_cancel_sell_reason_step(message: Message, state: FSMConte
         uid = r['user_id']
         asyncio.create_task(send_user_notification(
             uid,
-            f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request #{sell_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}',
+            f'⚠️ <b>Your sell request #{sell_id} was declined.</b>\n\n💬 <b>Reason:</b> {reason}',
             parse_mode=ParseMode.HTML
         ))
 
@@ -3590,7 +3590,7 @@ async def process_cancel_task_by_id_reason_step(message: Message, state: FSMCont
         uid = r['user_id']
         asyncio.create_task(send_user_notification(
             uid,
-            f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your submission for Task #{tid} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}\n\n<tg-emoji emoji-id="5251203410396458957">🛡</tg-emoji> The task has been returned to the pool.',
+            f'⚠️ <b>Your submission for Task #{tid} was declined.</b>\n\n💬 <b>Reason:</b> {reason}\n\n🛡 The task has been returned to the pool.',
             parse_mode=ParseMode.HTML
         ))
 
@@ -3627,7 +3627,7 @@ async def process_bulk_cancel_task_reason_step(message: Message, state: FSMConte
         uid = r['user_id']
         asyncio.create_task(send_user_notification(
             uid,
-            f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your submission for Task #{tid} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}\n\n<tg-emoji emoji-id="5251203410396458957">🛡</tg-emoji> The task has been returned to the pool.',
+            f'⚠️ <b>Your submission for Task #{tid} was declined.</b>\n\n💬 <b>Reason:</b> {reason}\n\n🛡 The task has been returned to the pool.',
             parse_mode=ParseMode.HTML
         ))
 
@@ -4719,13 +4719,13 @@ async def process_must_join_channel_step(message: Message, state: FSMContext):
 async def start_link_upi(call: CallbackQuery, state: FSMContext):
     await call.answer()
     await state.set_state(UserState.setting_upi)
-    await call.message.answer('<tg-emoji emoji-id="5902449142575141204">🔡</tg-emoji> Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>', parse_mode=ParseMode.HTML)
+    await call.message.answer('🔡 Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>', parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "link_usdt")
 async def start_link_usdt(call: CallbackQuery, state: FSMContext):
     await call.answer()
     await state.set_state(UserState.setting_usdt)
-    await call.message.answer('<tg-emoji emoji-id="5902449142575141204">🪙</tg-emoji> Send your <b>USDT BEP-20</b> address below:\n\n<i>Example: 0x1234567890abcdef1234567890abcdef12345678</i>', parse_mode=ParseMode.HTML)
+    await call.message.answer('🪙 Send your <b>USDT BEP-20</b> address below:\n\n<i>Example: 0x1234567890abcdef1234567890abcdef12345678</i>', parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "link_ultra")
 async def start_link_ultra(call: CallbackQuery, state: FSMContext):
@@ -4753,7 +4753,7 @@ async def choose_withdraw_method_handler(call: CallbackQuery):
             return
 
     await call.answer()
-    text = "<tg-emoji emoji-id=\"5445353829304387411\">💳</tg-emoji> <b>Select Withdrawal Method:</b>"
+    text = "💳 <b>Select Withdrawal Method:</b>"
     try:
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_withdraw_options_keyboard())
     except Exception as e:
@@ -4821,11 +4821,11 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
     
     await bot.send_message(
         ADMIN_ID,
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id} (UPI)</b>\n\n'
-        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
-        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{user_id}</code>\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Net Payout: ₹{payout_amount:.2f} (Fee Charged: ₹{UPI_FEES:.2f})\n'
-        f'<tg-emoji emoji-id="6152069549442208798">🏦</tg-emoji> UPI: <code>{upi}</code>',
+        f'💰 <b>WITHDRAWAL REQUEST #{withdraw_id} (UPI)</b>\n\n'
+        f'👤 @{call.from_user.username}\n'
+        f'✍️ <code>{user_id}</code>\n'
+        f'💰 Net Payout: ₹{payout_amount:.2f} (Fee Charged: ₹{UPI_FEES:.2f})\n'
+        f'🏦 UPI: <code>{upi}</code>',
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
@@ -4834,7 +4834,7 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
     fee_display = format_currency(UPI_FEES, curr)
     try:
         await call.message.edit_text(
-            f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request submitted!\n\n'
+            f'🚀 Withdrawal request submitted!\n\n'
             f'💰 <b>Net Payout:</b> {payout_display}\n'
             f'🏷 <b>Deducted Fee:</b> {fee_display}\n'
             f'🏦 <b>UPI ID:</b> <code>{upi}</code>',
@@ -4906,11 +4906,11 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
     usdt_amount = payout_amount / USD_TO_INR
     await bot.send_message(
         ADMIN_ID,
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id} (USDT BEP-20)</b>\n\n'
-        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> @{call.from_user.username}\n'
-        f'<tg-emoji emoji-id="5197269100878907942">✍️</tg-emoji> <code>{user_id}</code>\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> Net Payout: ₹{payout_amount:.2f} (~${usdt_amount:.2f} USDT) (Fee Charged: ₹{USDT_FEES:.2f})\n'
-        f'<tg-emoji emoji-id="5197434882321567830">🪙</tg-emoji> USDT BEP-20: <code>{usdt}</code>',
+        f'💰 <b>WITHDRAWAL REQUEST #{withdraw_id} (USDT BEP-20)</b>\n\n'
+        f'👤 @{call.from_user.username}\n'
+        f'✍️ <code>{user_id}</code>\n'
+        f'💰 Net Payout: ₹{payout_amount:.2f} (~${usdt_amount:.2f} USDT) (Fee Charged: ₹{USDT_FEES:.2f})\n'
+        f'🪙 USDT BEP-20: <code>{usdt}</code>',
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
@@ -4919,7 +4919,7 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
     fee_display = format_currency(USDT_FEES, curr)
     try:
         await call.message.edit_text(
-            f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Withdrawal request submitted!\n\n'
+            f'🚀 Withdrawal request submitted!\n\n'
             f'💰 <b>Net Payout:</b> {payout_display} (~${usdt_amount:.2f} USDT)\n'
             f'🏷 <b>Deducted Fee:</b> {fee_display}\n'
             f'🪙 <b>USDT Address:</b> <code>{usdt}</code>',
@@ -5027,7 +5027,7 @@ async def inline_submit_task(call: CallbackQuery, state: FSMContext):
         return
         
     await state.set_state(UserState.submitting_task)
-    await call.message.answer('<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Send screenshot or proof of completed task.', parse_mode=ParseMode.HTML)
+    await call.message.answer('✔️ Send screenshot or proof of completed task.', parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "user_cancel_task")
 async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
@@ -5050,7 +5050,7 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
             
     try:
-        await call.message.edit_text(f'<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Task #{task_id} has been cancelled and returned to the pool.', parse_mode=ParseMode.HTML)
+        await call.message.edit_text(f'✅ Task #{task_id} has been cancelled and returned to the pool.', parse_mode=ParseMode.HTML)
     except Exception:
         pass
 
@@ -5105,11 +5105,11 @@ async def handle_task_submission(message: Message, state: FSMContext):
     ]])
 
     admin_msg_text = (
-        f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>Task Submission #{task_id}</b>\n\n'
-        f'<tg-emoji emoji-id="5870458774455587120">👤</tg-emoji> <b>User:</b> @{message.from_user.username} (<code>{user_id}</code>)\n\n'
+        f'📤 <b>Task Submission #{task_id}</b>\n\n'
+        f'👤 <b>User:</b> @{message.from_user.username} (<code>{user_id}</code>)\n\n'
         f'📧 <b>Email:</b>\n<code>{email}</code>\n\n'
-        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b>\n<code>{password}</code>\n\n'
-        f'<tg-emoji emoji-id="5417924076503062111">💰</tg-emoji> <b>Reward:</b> ₹{reward}'
+        f'🔑 <b>Password:</b>\n<code>{password}</code>\n\n'
+        f'💰 <b>Reward:</b> ₹{reward}'
     )
 
     if message.photo:
@@ -5128,9 +5128,9 @@ async def handle_task_submission(message: Message, state: FSMContext):
                         InlineKeyboardButton(text="Decline", callback_data=f"w_td:{task_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
                     ]])
                     worker_msg_text = (
-                        f'<tg-emoji emoji-id="5206607081334906820">📤</tg-emoji> <b>New Task Submission #{task_id}</b>\n\n'
+                        f'📤 <b>New Task Submission #{task_id}</b>\n\n'
                         f'📧 <b>Email:</b>\n<code>{email}</code>\n\n'
-                        f'<tg-emoji emoji-id="6005570495603282482">🔑</tg-emoji> <b>Password:</b>\n<code>{password}</code>'
+                        f'🔑 <b>Password:</b>\n<code>{password}</code>'
                     )
                     
                     if message.photo:
@@ -5149,8 +5149,8 @@ async def handle_task_submission(message: Message, state: FSMContext):
             asyncio.create_task(send_worker_alert())
 
     sent_msg = await message.answer(
-        f'<tg-emoji emoji-id="5206607081334906820">✔️</tg-emoji> Task #{task_id} submission sent for review.\n\n'
-        f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
+        f'✔️ Task #{task_id} submission sent for review.\n\n'
+        f'⚠️ <b>Important:</b> Please make sure to <b>logout</b> of this account from your device!', 
         reply_markup=get_main_menu_keyboard(), 
         parse_mode=ParseMode.HTML
     )
@@ -5197,7 +5197,7 @@ async def approve_sell_unified(call: CallbackQuery):
                 ref_user_data = await get_user_data(referred_by)
                 ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
                 notif_text = (
-                    f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> sell gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
+                    f'🎉 Your referral <code>{user_id}</code> sell gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
                 )
                 await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
             
@@ -5232,7 +5232,7 @@ async def decline_sell_unified(call: CallbackQuery, state: FSMContext):
         admin_msg_id=call.message.message_id,
         is_photo=bool(call.message.photo)
     )
-    await call.message.answer('<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining this sell request:</b>', parse_mode=ParseMode.HTML)
+    await call.message.answer('⚠️ <b>Please reply with the reason for declining this sell request:</b>', parse_mode=ParseMode.HTML)
 
 @dp.message(AdminState.waiting_for_sell_reject_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_reject_reason(message: Message, state: FSMContext):
@@ -5247,7 +5247,7 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
         async with db_pool.acquire() as conn:
             await conn.execute("UPDATE pending_sells SET status='declined' WHERE id=$1", sell_id)
 
-    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Sell request declined.</b>\n<b>Reason:</b> {reason}'
+    new_text = f'⚠️ <b>Sell request declined.</b>\n<b>Reason:</b> {reason}'
     try:
         if is_photo:
             await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
@@ -5258,11 +5258,11 @@ async def process_sell_reject_reason(message: Message, state: FSMContext):
 
     asyncio.create_task(send_user_notification(
         user_id, 
-        f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your sell request #{sell_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}', 
+        f'⚠️ <b>Your sell request #{sell_id} was declined.</b>\n\n💬 <b>Reason:</b> {reason}', 
         parse_mode=ParseMode.HTML
     ))
 
-    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason sent to user.', parse_mode=ParseMode.HTML)
+    await message.answer('✅ Rejection reason sent to user.', parse_mode=ParseMode.HTML)
     await state.clear()
 
 # ============================================
@@ -5314,7 +5314,7 @@ async def approve_task(call: CallbackQuery):
                 ref_user_data = await get_user_data(referred_by)
                 ref_amt_str = format_currency(ref_reward, ref_user_data['currency'])
                 notif_text = (
-                    f'<tg-emoji emoji-id="6217663806110175239">🎉</tg-emoji> Your referral <code>{user_id}</code> task gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
+                    f'🎉 Your referral <code>{user_id}</code> task gmail got approved and <b>{ref_amt_str}</b> credited to your balance!'
                 )
                 await send_user_notification(referred_by, notif_text, parse_mode=ParseMode.HTML)
 
@@ -5353,7 +5353,7 @@ async def decline_task(call: CallbackQuery, state: FSMContext):
         admin_msg_id=call.message.message_id,
         is_photo=bool(call.message.photo)
     )
-    await call.message.answer(f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Please reply with the reason for declining Task #{task_id}:</b>', parse_mode=ParseMode.HTML)
+    await call.message.answer(f'⚠️ <b>Please reply with the reason for declining Task #{task_id}:</b>', parse_mode=ParseMode.HTML)
 
 @dp.message(AdminState.waiting_for_task_reject_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_task_reject_reason(message: Message, state: FSMContext):
@@ -5371,7 +5371,7 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
                 await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
                 await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
 
-    new_text = f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Task #{task_id} declined.</b>\n<b>Reason:</b> {reason}'
+    new_text = f'⚠️ <b>Task #{task_id} declined.</b>\n<b>Reason:</b> {reason}'
     try:
         if is_photo:
             await bot.edit_message_caption(chat_id=message.chat.id, message_id=admin_msg_id, caption=new_text, reply_markup=None, parse_mode=ParseMode.HTML)
@@ -5382,11 +5382,11 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
 
     asyncio.create_task(send_user_notification(
         user_id, 
-        f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> <b>Your submission for Task #{task_id} was declined.</b>\n\n<tg-emoji emoji-id="4956475826762679249">💬</tg-emoji> <b>Reason:</b> {reason}\n\n<tg-emoji emoji-id="5251203410396458957">🛡</tg-emoji> The task has been returned to the pool.', 
+        f'⚠️ <b>Your submission for Task #{task_id} was declined.</b>\n\n💬 <b>Reason:</b> {reason}\n\n🛡 The task has been returned to the pool.', 
         parse_mode=ParseMode.HTML
     ))
 
-    await message.answer('<tg-emoji emoji-id="6217663806110175239">✅</tg-emoji> Rejection reason recorded and user notified.', parse_mode=ParseMode.HTML)
+    await message.answer('✅ Rejection reason recorded and user notified.', parse_mode=ParseMode.HTML)
     await state.clear()
 
 # ============================================
@@ -5459,7 +5459,7 @@ async def reject_withdraw(call: CallbackQuery):
         formatted_amt = format_currency(refund_total, user_data['currency'])
         await send_user_notification(
             user_id, 
-            f'<tg-emoji emoji-id="5447644880824181073">⚠️</tg-emoji> Your withdrawal request #{withdrawal_id} was rejected.\n'
+            f'⚠️ Your withdrawal request #{withdrawal_id} was rejected.\n'
             f'💰 <b>{formatted_amt}</b> has been refunded back to your balance.', 
             parse_mode=ParseMode.HTML
         )
@@ -5496,7 +5496,7 @@ async def auto_expire_tasks():
             for task_id, user_id in expired_30m:
                 asyncio.create_task(send_user_notification(
                     user_id, 
-                    f'<tg-emoji emoji-id="5195033767969839232">🚀</tg-emoji> Task #{task_id} time limit expired (30 mins).\nThe task was returned to the pool.', 
+                    f'🚀 Task #{task_id} time limit expired (30 mins).\nThe task was returned to the pool.', 
                     reply_markup=get_main_menu_keyboard(), 
                     parse_mode=ParseMode.HTML
                 ))
