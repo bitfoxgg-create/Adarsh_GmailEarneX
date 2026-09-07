@@ -611,9 +611,8 @@ def get_must_join_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(text="📢 Join Channel", url=channel_url)
     kb.button(
-        text="Joined / Verify", 
+        text="✅ Joined / Verify", 
         callback_data="check_must_join",
-        icon_custom_emoji_id="6217663806110175239",
         style="success"
     )
     kb.adjust(1, 1)
@@ -622,50 +621,42 @@ def get_must_join_keyboard():
 def get_main_menu_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="Get Task",
+        text="✍️ Get Task",
         callback_data="menu_get_task",
-        icon_custom_emoji_id="5197269100878907942",
         style="success"
     )
     kb.button(
-        text="Balance",
+        text="💰 Balance",
         callback_data="menu_balance",
-        icon_custom_emoji_id="5417924076503062111",
         style="primary"
     )
     kb.button(
-        text="Sell Gmail",
+        text="📨 Sell Gmail",
         callback_data="menu_sell_gmail",
-        icon_custom_emoji_id="5377548235709619284",
         style="success"
     )
     kb.button(
-        text="History",
+        text="📜 History",
         callback_data="menu_history",
-        icon_custom_emoji_id="5440410042773824003",
         style="primary"
     )
     kb.button(
-        text="Referrals",
+        text="👥 Referrals",
         callback_data="menu_referrals",
-        icon_custom_emoji_id="5391292736647209211",
         style="success"
     )
     kb.button(
-        text="My Accounts",
+        text="📁 My Accounts",
         callback_data="menu_my_accounts",
-        icon_custom_emoji_id="5445221832074483553",
         style="primary"
     )
     kb.button(
-        text="Settings",
-        callback_data="menu_settings",
-        icon_custom_emoji_id="5893161718179173515"
+        text="⚙️ Settings",
+        callback_data="menu_settings"
     )
     kb.button(
-        text="Support",
+        text="🛠 Support",
         callback_data="menu_support",
-        icon_custom_emoji_id="5274099962655816924",
         style="danger"
     )
     kb.adjust(2, 2, 2, 1, 1)
@@ -674,15 +665,13 @@ def get_main_menu_keyboard():
 def get_add_task_type_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="Single Add", 
+        text="➕ Single Add", 
         callback_data="admin_add_task_single", 
-        icon_custom_emoji_id="5870458774455587120", 
         style="success"
     )
     kb.button(
-        text="Bulk Add", 
+        text="📦 Bulk Add", 
         callback_data="admin_add_task_bulk", 
-        icon_custom_emoji_id="5206607081334906820", 
         style="primary"
     )
     kb.adjust(2)
@@ -695,37 +684,32 @@ def get_referral_inline_keyboard(user_id: int):
     
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="Copy link",
+        text="🔗 Copy link",
         copy_text=CopyTextButton(text=invite_link),
-        icon_custom_emoji_id="5271604874419647061",
         style="primary"
     )
     kb.button(
-        text="Share link",
+        text="📤 Share link",
         url=share_url,
-        icon_custom_emoji_id="5305265301917549162",
         style="primary"
     )
     kb.button(
-        text="Back",
-        callback_data="menu_back",
-        icon_custom_emoji_id="5352759161945867747"
+        text="⬅️ Back",
+        callback_data="menu_back"
     )
     kb.adjust(2, 1)
     return kb.as_markup()
 
 def get_settings_keyboard(notif_enabled: bool, currency: str):
     kb = InlineKeyboardBuilder()
-    notif_text = "Notifications: ON" if notif_enabled else "Notifications: OFF"
-    notif_emoji = "6039486778597970865" if notif_enabled else "6039569594157371705"
-    curr_text = f"Currency: {currency} ({'$' if currency=='USD' else '₹'})"
+    notif_text = "🔔 Notifications: ON" if notif_enabled else "🔕 Notifications: OFF"
+    curr_text = f"💱 Currency: {currency} ({'$' if currency=='USD' else '₹'})"
     
-    kb.button(text=notif_text, callback_data="toggle_notif", icon_custom_emoji_id=notif_emoji, style="primary")
-    kb.button(text=curr_text, callback_data="toggle_currency", icon_custom_emoji_id="5893365462837760511", style="primary")
+    kb.button(text=notif_text, callback_data="toggle_notif", style="primary")
+    kb.button(text=curr_text, callback_data="toggle_currency", style="primary")
     kb.button(
-        text="Back",
-        callback_data="menu_back",
-        icon_custom_emoji_id="5352759161945867747"
+        text="⬅️ Back",
+        callback_data="menu_back"
     )
     kb.adjust(1, 1, 1)
     return kb.as_markup()
@@ -798,13 +782,11 @@ def get_pending_reviews_inline_keyboard():
     kb.button(
         text="📨 Sell Gmail",
         callback_data="admin_view_pending_sells",
-        icon_custom_emoji_id="5377548235709619284",
         style="primary"
     )
     kb.button(
         text="✍️ Task Gmail",
         callback_data="admin_view_pending_tasks",
-        icon_custom_emoji_id="5197269100878907942",
         style="primary"
     )
     kb.adjust(2)
@@ -815,20 +797,17 @@ def get_pending_withdrawals_inline_keyboard():
     kb.button(
         text="🏦 UPI",
         callback_data="admin_view_pending_withdraw_upi",
-        icon_custom_emoji_id="6291696801636424911",
         style="primary"
     )
     kb.button(
         text="🪙 USDT BEP-20",
         callback_data="admin_view_pending_withdraw_usdt",
-        icon_custom_emoji_id="5197434882321567830",
         style="primary"
     )
     if ULTRA_STATUS:
         kb.button(
             text="⚡️ Ultra Gateway",
             callback_data="admin_view_pending_withdraw_ultra",
-            icon_custom_emoji_id="5195033767969839232",
             style="primary"
         )
         kb.adjust(3)
@@ -839,64 +818,55 @@ def get_pending_withdrawals_inline_keyboard():
 def get_change_values_inline_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="1. Change Tasks Rate",
+        text="💰 1. Change Tasks Rate",
         callback_data="admin_change_tasks_rate",
-        icon_custom_emoji_id="5417924076503062111",
         style="primary"
     )
     kb.button(
-        text="2. Change Sell Rate",
+        text="📨 2. Change Sell Rate",
         callback_data="admin_change_sell_rate",
-        icon_custom_emoji_id="5377548235709619284",
         style="primary"
     )
     kb.button(
-        text="3. Change Min. Withdrawal",
+        text="💸 3. Change Min. Withdrawal",
         callback_data="admin_change_min_withdraw",
-        icon_custom_emoji_id="5444856076954520455",
         style="primary"
     )
     kb.button(
-        text="4. Change Task Password",
+        text="🔑 4. Change Task Password",
         callback_data="admin_change_task_pass",
-        icon_custom_emoji_id="6005570495603282482",
         style="primary"
     )
     
-    pass_mode_text = f"4b. Password Mode: {'🟢 Fixed (Default)' if DEFAULT_TASK_PASS_STATUS else '🔴 Random'}"
+    pass_mode_text = f"🔑 4b. Password Mode: {'🟢 Fixed (Default)' if DEFAULT_TASK_PASS_STATUS else '🔴 Random'}"
     kb.button(
         text=pass_mode_text,
         callback_data="admin_toggle_task_pass_mode",
-        icon_custom_emoji_id="6005570495603282482",
         style="success" if DEFAULT_TASK_PASS_STATUS else "danger"
     )
 
     kb.button(
-        text="5. Change Fees",
+        text="💰 5. Change Fees",
         callback_data="admin_change_fees",
-        icon_custom_emoji_id="5417924076503062111",
         style="primary"
     )
     kb.button(
-        text="6. Change Ultra",
+        text="⚡️ 6. Change Ultra",
         callback_data="admin_change_ultra",
-        icon_custom_emoji_id="6005570495603282482",
         style="primary"
     )
     
-    single_task_btn_text = f"7. Single Tasks: {'🟢 ON' if SINGLE_TASK_STATUS else '🔴 OFF'}"
+    single_task_btn_text = f"✍️ 7. Single Tasks: {'🟢 ON' if SINGLE_TASK_STATUS else '🔴 OFF'}"
     kb.button(
         text=single_task_btn_text,
         callback_data="admin_toggle_single_task",
-        icon_custom_emoji_id="5197269100878907942",
         style="success" if SINGLE_TASK_STATUS else "danger"
     )
 
-    sell_gmail_btn_text = f"8. Sell Gmail: {'🟢 ON' if SELL_GMAIL_STATUS else '🔴 OFF'}"
+    sell_gmail_btn_text = f"📨 8. Sell Gmail: {'🟢 ON' if SELL_GMAIL_STATUS else '🔴 OFF'}"
     kb.button(
         text=sell_gmail_btn_text,
         callback_data="admin_toggle_sell_gmail",
-        icon_custom_emoji_id="5377548235709619284",
         style="success" if SELL_GMAIL_STATUS else "danger"
     )
 
@@ -911,19 +881,16 @@ def get_validator_admin_inline_keyboard():
     kb.button(
         text="🔑 Change Key", 
         callback_data="admin_validator_change_key", 
-        icon_custom_emoji_id="6005570495603282482", 
         style="primary"
     )
     kb.button(
         text="🔄 Change Provider", 
         callback_data="admin_validator_change_provider", 
-        icon_custom_emoji_id="5893365462837760511", 
         style="primary"
     )
     kb.button(
         text=status_toggle_text, 
         callback_data="admin_validator_toggle_status", 
-        icon_custom_emoji_id="6217663806110175239", 
         style=status_style
     )
     kb.adjust(2, 1)
@@ -934,13 +901,11 @@ def get_unassign_inline_keyboard():
     kb.button(
         text="👤 User ID", 
         callback_data="unassign_by_user_id", 
-        icon_custom_emoji_id="5870458774455587120",
         style="primary"
     )
     kb.button(
         text="👥 All Users", 
         callback_data="unassign_all_users", 
-        icon_custom_emoji_id="5274099962655816924",
         style="danger"
     )
     kb.adjust(2)
@@ -948,30 +913,24 @@ def get_unassign_inline_keyboard():
 
 def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool, ultra_set: bool = False):
     kb = InlineKeyboardBuilder()
-    upi_link_text = "Change UPI" if upi_set else "Link UPI"
-    usdt_link_text = "Change USDT" if usdt_set else "Link USDT BEP-20"
-    
-    upi_emoji = "6291696801636424911" if upi_set else "5902449142575141204"
-    usdt_emoji = "5197434882321567830" if usdt_set else "5902449142575141204"
+    upi_link_text = "🏦 Change UPI" if upi_set else "🏦 Link UPI"
+    usdt_link_text = "🪙 Change USDT" if usdt_set else "🪙 Link USDT BEP-20"
 
-    kb.button(text=upi_link_text, callback_data="link_upi", icon_custom_emoji_id=upi_emoji, style="primary")
-    kb.button(text=usdt_link_text, callback_data="link_usdt", icon_custom_emoji_id=usdt_emoji, style="primary")
+    kb.button(text=upi_link_text, callback_data="link_upi", style="primary")
+    kb.button(text=usdt_link_text, callback_data="link_usdt", style="primary")
     
     if ULTRA_STATUS:
-        ultra_link_text = "Change Ultra" if ultra_set else "Link Ultra Gateway"
-        ultra_emoji = "5195033767969839232" if ultra_set else "5902449142575141204"
-        kb.button(text=ultra_link_text, callback_data="link_ultra", icon_custom_emoji_id=ultra_emoji, style="primary")
+        ultra_link_text = "⚡️ Change Ultra" if ultra_set else "⚡️ Link Ultra Gateway"
+        kb.button(text=ultra_link_text, callback_data="link_ultra", style="primary")
 
     kb.button(
-        text="Withdraw", 
+        text="💸 Withdraw", 
         callback_data="choose_withdraw_method", 
-        icon_custom_emoji_id="5444856076954520455",
         style="success"
     )
     kb.button(
-        text="Back",
-        callback_data="menu_back",
-        icon_custom_emoji_id="5352759161945867747"
+        text="⬅️ Back",
+        callback_data="menu_back"
     )
     if ULTRA_STATUS:
         kb.adjust(2, 1, 1, 1)
@@ -981,14 +940,13 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool, ultra_set: bool =
 
 def get_withdraw_options_keyboard():
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"Withdraw via UPI (Fee: ₹{UPI_FEES:.2f})", callback_data="withdraw_upi", icon_custom_emoji_id="6291696801636424911", style="success")
-    kb.button(text=f"Withdraw via USDT BEP-20 (Fee: ₹{USDT_FEES:.2f})", callback_data="withdraw_usdt", icon_custom_emoji_id="5197434882321567830", style="success")
+    kb.button(text=f"🏦 Withdraw via UPI (Fee: ₹{UPI_FEES:.2f})", callback_data="withdraw_upi", style="success")
+    kb.button(text=f"🪙 Withdraw via USDT BEP-20 (Fee: ₹{USDT_FEES:.2f})", callback_data="withdraw_usdt", style="success")
     if ULTRA_STATUS:
-        kb.button(text=f"Withdraw via Ultra Gateway (0 Fees)", callback_data="withdraw_ultra", icon_custom_emoji_id="5195033767969839232", style="success")
+        kb.button(text=f"⚡️ Withdraw via Ultra Gateway (0 Fees)", callback_data="withdraw_ultra", style="success")
     kb.button(
-        text="Back",
-        callback_data="menu_balance",
-        icon_custom_emoji_id="5352759161945867747"
+        text="⬅️ Back",
+        callback_data="menu_balance"
     )
     if ULTRA_STATUS:
         kb.adjust(1, 1, 1, 1)
@@ -999,9 +957,8 @@ def get_withdraw_options_keyboard():
 def get_back_inline_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="Back",
-        callback_data="menu_back",
-        icon_custom_emoji_id="5352759161945867747"
+        text="⬅️ Back",
+        callback_data="menu_back"
     )
     kb.adjust(1)
     return kb.as_markup()
@@ -1009,15 +966,13 @@ def get_back_inline_keyboard():
 def get_task_action_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
-            text="Submit", 
+            text="✔️ Submit", 
             callback_data="user_submit_task", 
-            icon_custom_emoji_id="5206607081334906820",
             style="success"
         ),
         InlineKeyboardButton(
-            text="Cancel", 
+            text="🚫 Cancel", 
             callback_data="user_cancel_task", 
-            icon_custom_emoji_id="5274099962655816924",
             style="danger"
         )
     ]])
@@ -1025,9 +980,8 @@ def get_task_action_keyboard():
 def get_support_cancel_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="Back", 
-        callback_data="menu_back", 
-        icon_custom_emoji_id="5352759161945867747"
+        text="⬅️ Back", 
+        callback_data="menu_back"
     )
     kb.adjust(1)
     return kb.as_markup()
@@ -1299,7 +1253,7 @@ async def render_transaction_history_page(target_user_id: int, page: int = 1, is
         kb.row(*nav_buttons)
 
     if not is_admin:
-        kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back", icon_custom_emoji_id="5352759161945867747"))
+        kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back"))
 
     return text, kb.as_markup()
 
@@ -1686,7 +1640,7 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
         
         kb.row(*nav_buttons)
 
-    kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back", icon_custom_emoji_id="5352759161945867747"))
+    kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back"))
 
     return text, kb.as_markup()
 
@@ -1822,8 +1776,8 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
                     txt = (
                         f'⚠️ <b>You already have an active task.</b>\n\n'
                         f'🎯 <b>Your Current Task</b>\n\n'
-                        f'✍️ #{task_id}\n'
-                        f'👤 <b>Email:</b> {username} | 🔑 <b>Password:</b> <code>{password}</code>\n'
+                        f'🆔 #{task_id}\n'
+                        f'📧 <b>Email:</b> {username} | 🔑 <b>Password:</b> <code>{password}</code>\n'
                         f'💰 <b>Reward:</b> {reward_str}\n\n'
                         f'🚀 Time Remaining: {mins}m {secs}s'
                     )
@@ -1876,7 +1830,7 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
     reward_str = format_currency(reward, user_curr)
     txt = (
         f'🎯 <b>Task #{task_id}</b>\n\n'
-        f'👤 <b>Email:</b> {username} | 🔑 <b>Password:</b> <code>{password}</code>\n'
+        f'📧 <b>Email:</b> {username} | 🔑 <b>Password:</b> <code>{password}</code>\n'
         f'💰 <b>Reward:</b> {reward_str}\n\n'
         f'🚀 You have ONLY 30 MINUTES to complete this task.'
     )
@@ -2018,8 +1972,8 @@ async def process_sell_password(message: Message, state: FSMContext):
         )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Approve", callback_data=f"sa:{sell_id}", icon_custom_emoji_id="6217663806110175239", style="success"),
-        InlineKeyboardButton(text="Decline", callback_data=f"sd:{sell_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
+        InlineKeyboardButton(text="✅ Approve", callback_data=f"sa:{sell_id}", style="success"),
+        InlineKeyboardButton(text="❌ Decline", callback_data=f"sd:{sell_id}", style="danger")
     ]])
 
     admin_message_text = (
@@ -2193,7 +2147,6 @@ async def cb_admin_view_support(call: CallbackQuery):
             InlineKeyboardButton(
                 text="💬 Reply User",
                 callback_data=f"sr:{target_user_id}",
-                icon_custom_emoji_id="5870458774455587120",
                 style="primary"
             )
         ],
@@ -2201,7 +2154,6 @@ async def cb_admin_view_support(call: CallbackQuery):
             InlineKeyboardButton(
                 text="🚫 Ban User",
                 callback_data=f"ban_supp:{target_user_id}",
-                icon_custom_emoji_id="5274099962655816924",
                 style="danger"
             )
         ]
@@ -2244,7 +2196,6 @@ async def cb_admin_ban_support_user(call: CallbackQuery):
             InlineKeyboardButton(
                 text="💬 Reply User",
                 callback_data=f"sr:{target_user_id}",
-                icon_custom_emoji_id="5870458774455587120",
                 style="primary"
             )
         ]
@@ -3002,15 +2953,13 @@ async def process_add_task_step(message: Message, state: FSMContext):
         await state.update_data(pending_add_username=username)
         kb = InlineKeyboardBuilder()
         kb.button(
-            text="Confirm", 
+            text="✅ Confirm", 
             callback_data="confirm_add_duplicate_task", 
-            icon_custom_emoji_id="6217663806110175239", 
             style="success"
         )
         kb.button(
-            text="Back", 
+            text="⬅️ Back", 
             callback_data="cancel_add_duplicate_task", 
-            icon_custom_emoji_id="5352759161945867747", 
             style="danger"
         )
         kb.adjust(2)
@@ -3040,8 +2989,8 @@ async def insert_new_task(message: Message, username: str):
         
     await message.answer(
         f'✅ <b>Task Added Successfully!</b>\n\n'
-        f'✍️ <b>Task ID:</b> <code>#{task_id}</code>\n'
-        f'👤 <b>Email:</b> <code>{username}</code>\n'
+        f'🆔 <b>Task ID:</b> <code>#{task_id}</code>\n'
+        f'📧 <b>Email:</b> <code>{username}</code>\n'
         f'🔑 <b>Password:</b> <code>{password}</code>\n'
         f'💰 <b>Reward:</b> ₹{default_reward}', 
         parse_mode=ParseMode.HTML,
@@ -3145,8 +3094,8 @@ async def cb_admin_view_pending_sells(call: CallbackQuery):
         claimed_str = f"\n👷 <b>Claimed By Worker:</b> <code>{claimed_by}</code>" if claimed_by else "\n📦 <b>Status:</b> 🟢 Unclaimed Stock"
 
         kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="Approve", callback_data=f"sa:{sell_id}", icon_custom_emoji_id="6217663806110175239", style="success"),
-            InlineKeyboardButton(text="Decline", callback_data=f"sd:{sell_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
+            InlineKeyboardButton(text="✅ Approve", callback_data=f"sa:{sell_id}", style="success"),
+            InlineKeyboardButton(text="❌ Decline", callback_data=f"sd:{sell_id}", style="danger")
         ]])
 
         await call.message.answer(
@@ -3199,14 +3148,14 @@ async def cb_admin_view_pending_tasks(call: CallbackQuery):
             password = DEFAULT_TASK_PASS
         
         kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text='Approve', callback_data=f'ta:{task_id}', icon_custom_emoji_id="6217663806110175239", style="success"),
-            InlineKeyboardButton(text='Decline', callback_data=f'td:{task_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
+            InlineKeyboardButton(text='✅ Approve', callback_data=f'ta:{task_id}', style="success"),
+            InlineKeyboardButton(text='❌ Decline', callback_data=f'td:{task_id}', style="danger")
         ]])
         
         await call.message.answer(
             f'📤 <b>Pending Task Submission</b>\n\n'
             f'👤 <b>User ID:</b> <code>{user_id}</code>\n'
-            f'✍️ <b>Task #{task_id}</b>\n'
+            f'🆔 <b>Task #{task_id}</b>\n'
             f'📧 <b>Email:</b> <code>{email}</code>\n'
             f'🔑 <b>Password:</b> <code>{password}</code>\n'
             f'💰 <b>Reward:</b> ₹{reward}',
@@ -3293,15 +3242,13 @@ async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
 
         kb = InlineKeyboardBuilder()
         kb.button(
-            text="Pay", 
+            text="💸 Pay", 
             callback_data=f"wp:{withdraw_id}", 
-            icon_custom_emoji_id="5444856076954520455", 
             style="success"
         )
         kb.button(
-            text="Reject", 
+            text="❌ Reject", 
             callback_data=f"wr:{withdraw_id}", 
-            icon_custom_emoji_id="5274099962655816924", 
             style="danger"
         )
         kb.adjust(2)
@@ -3310,7 +3257,7 @@ async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
 
         await call.message.answer(
             f'💰 <b>WITHDRAWAL REQUEST #{withdraw_id}</b>\n\n'
-            f'✍️ <b>User ID:</b> <code>{user_id}</code>\n'
+            f'🆔 <b>User ID:</b> <code>{user_id}</code>\n'
             f'💳 <b>Method:</b> <code>{method}</code>\n'
             f'💰 <b>Amount:</b> ₹{amount:.2f}{extra_usdt_info}\n'
             f'{address_emoji} <b>Address:</b> <code>{payment_address}</code>\n'
@@ -3852,9 +3799,8 @@ async def process_find_id_query_step(message: Message, state: FSMContext):
     kb = InlineKeyboardBuilder()
     if target_task_id:
         kb.button(
-            text="ViewPast",
+            text="📜 ViewPast",
             callback_data=f"view_past_task:{target_task_id}",
-            icon_custom_emoji_id="5870458774455587120",
             style="success"
         )
     
@@ -4719,7 +4665,7 @@ async def process_must_join_channel_step(message: Message, state: FSMContext):
 async def start_link_upi(call: CallbackQuery, state: FSMContext):
     await call.answer()
     await state.set_state(UserState.setting_upi)
-    await call.message.answer('🔡 Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>', parse_mode=ParseMode.HTML)
+    await call.message.answer('🏦 Send your UPI ID below:\n\n<i>Example: username@upi or 9876543210@paytm</i>', parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "link_usdt")
 async def start_link_usdt(call: CallbackQuery, state: FSMContext):
@@ -4806,15 +4752,13 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text='Pay', 
+        text='💸 Pay', 
         callback_data=f'wp:{withdraw_id}',
-        icon_custom_emoji_id="5444856076954520455",
         style="success"
     )
     kb.button(
-        text='Reject', 
+        text='❌ Reject', 
         callback_data=f'wr:{withdraw_id}',
-        icon_custom_emoji_id="5274099962655816924",
         style="danger"
     )
     kb.adjust(2)
@@ -4823,7 +4767,7 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
         ADMIN_ID,
         f'💰 <b>WITHDRAWAL REQUEST #{withdraw_id} (UPI)</b>\n\n'
         f'👤 @{call.from_user.username}\n'
-        f'✍️ <code>{user_id}</code>\n'
+        f'🆔 <code>{user_id}</code>\n'
         f'💰 Net Payout: ₹{payout_amount:.2f} (Fee Charged: ₹{UPI_FEES:.2f})\n'
         f'🏦 UPI: <code>{upi}</code>',
         reply_markup=kb.as_markup(),
@@ -4890,15 +4834,13 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text='Pay', 
+        text='💸 Pay', 
         callback_data=f'wp:{withdraw_id}',
-        icon_custom_emoji_id="5444856076954520455",
         style="success"
     )
     kb.button(
-        text='Reject', 
+        text='❌ Reject', 
         callback_data=f'wr:{withdraw_id}',
-        icon_custom_emoji_id="5274099962655816924",
         style="danger"
     )
     kb.adjust(2)
@@ -4908,7 +4850,7 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
         ADMIN_ID,
         f'💰 <b>WITHDRAWAL REQUEST #{withdraw_id} (USDT BEP-20)</b>\n\n'
         f'👤 @{call.from_user.username}\n'
-        f'✍️ <code>{user_id}</code>\n'
+        f'🆔 <code>{user_id}</code>\n'
         f'💰 Net Payout: ₹{payout_amount:.2f} (~${usdt_amount:.2f} USDT) (Fee Charged: ₹{USDT_FEES:.2f})\n'
         f'🪙 USDT BEP-20: <code>{usdt}</code>',
         reply_markup=kb.as_markup(),
@@ -5100,8 +5042,8 @@ async def handle_task_submission(message: Message, state: FSMContext):
         await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
 
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text='Approve', callback_data=f'ta:{task_id}', icon_custom_emoji_id="6217663806110175239", style="success"),
-        InlineKeyboardButton(text='Decline', callback_data=f'td:{task_id}', icon_custom_emoji_id="5274099962655816924", style="danger")
+        InlineKeyboardButton(text='✅ Approve', callback_data=f'ta:{task_id}', style="success"),
+        InlineKeyboardButton(text='❌ Decline', callback_data=f'td:{task_id}', style="danger")
     ]])
 
     admin_msg_text = (
@@ -5124,8 +5066,8 @@ async def handle_task_submission(message: Message, state: FSMContext):
                 try:
                     w_bot = Bot(token=WORKER_BOT_TOKEN)
                     worker_kb = InlineKeyboardMarkup(inline_keyboard=[[
-                        InlineKeyboardButton(text="Approve", callback_data=f"w_ta:{task_id}", icon_custom_emoji_id="6217663806110175239", style="success"),
-                        InlineKeyboardButton(text="Decline", callback_data=f"w_td:{task_id}", icon_custom_emoji_id="5274099962655816924", style="danger")
+                        InlineKeyboardButton(text="✅ Approve", callback_data=f"w_ta:{task_id}", style="success"),
+                        InlineKeyboardButton(text="❌ Decline", callback_data=f"w_td:{task_id}", style="danger")
                     ]])
                     worker_msg_text = (
                         f'📤 <b>New Task Submission #{task_id}</b>\n\n'
