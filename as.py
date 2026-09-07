@@ -1432,9 +1432,12 @@ async def cb_menu_back(call: CallbackQuery, state: FSMContext):
     )
     try:
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
-    except:
-        sent_msg = await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
-        await state.update_data(last_menu_msg_id=sent_msg.message_id)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            sent_msg = await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_main_menu_keyboard())
+            await state.update_data(last_menu_msg_id=sent_msg.message_id)
+        else:
+            await state.update_data(last_menu_msg_id=call.message.message_id)
     else:
         await state.update_data(last_menu_msg_id=call.message.message_id)
 
@@ -1483,8 +1486,9 @@ async def cb_referrals(call: CallbackQuery, state: FSMContext):
 
     try:
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_referral_inline_keyboard(user_id))
-    except:
-        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_referral_inline_keyboard(user_id))
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_referral_inline_keyboard(user_id))
     await state.update_data(last_menu_msg_id=call.message.message_id)
 
 # ============================================
@@ -1651,8 +1655,9 @@ async def cb_my_accounts(call: CallbackQuery, state: FSMContext):
     text, reply_markup = await render_my_accounts_page(call.from_user.id, page=1)
     try:
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-    except Exception:
-        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
     await state.update_data(last_menu_msg_id=call.message.message_id)
 
 @dp.callback_query(F.data.startswith("myacc_page:"))
@@ -1683,8 +1688,9 @@ async def cb_settings(call: CallbackQuery, state: FSMContext):
     )
     try:
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_settings_keyboard(notif, curr))
-    except:
-        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_settings_keyboard(notif, curr))
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_settings_keyboard(notif, curr))
     await state.update_data(last_menu_msg_id=call.message.message_id)
 
 @dp.callback_query(F.data == "toggle_notif")
@@ -1751,8 +1757,9 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
                     txt = '🚀 Your task submission is currently under admin review. Please wait for approval before taking another task.'
                     try:
                         await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
-                    except:
-                        await call.message.answer(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
+                    except TelegramBadRequest as e:
+                        if "message is not modified" not in str(e):
+                            await call.message.answer(txt, reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
                     await state.update_data(last_menu_msg_id=call.message.message_id)
                     return
             elif task_status == 'assigned':
@@ -1784,9 +1791,10 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
                     try:
                         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
                         await conn.execute("UPDATE task_assignments SET message_id=$1 WHERE task_id=$2", call.message.message_id, task_id)
-                    except:
-                        new_m = await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
-                        await conn.execute("UPDATE task_assignments SET message_id=$1 WHERE task_id=$2", new_m.message_id, task_id)
+                    except TelegramBadRequest as e:
+                        if "message is not modified" not in str(e):
+                            new_m = await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+                            await conn.execute("UPDATE task_assignments SET message_id=$1 WHERE task_id=$2", new_m.message_id, task_id)
                     await state.update_data(last_menu_msg_id=call.message.message_id)
                     return
                 else:
@@ -1799,8 +1807,9 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
             txt = '📭 No tasks available right now.'
             try:
                 await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard())
-            except:
-                await call.message.answer(txt, reply_markup=get_main_menu_keyboard())
+            except TelegramBadRequest as e:
+                if "message is not modified" not in str(e):
+                    await call.message.answer(txt, reply_markup=get_main_menu_keyboard())
             await state.update_data(last_menu_msg_id=call.message.message_id)
             return
         
@@ -1838,10 +1847,11 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
         async with db_pool.acquire() as conn:
             await conn.execute("UPDATE task_assignments SET message_id=$1 WHERE task_id=$2", call.message.message_id, task_id)
-    except:
-        new_m = await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
-        async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE task_assignments SET message_id=$1 WHERE task_id=$2", new_m.message_id, task_id)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            new_m = await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_task_action_keyboard())
+            async with db_pool.acquire() as conn:
+                await conn.execute("UPDATE task_assignments SET message_id=$1 WHERE task_id=$2", new_m.message_id, task_id)
     await state.update_data(last_menu_msg_id=call.message.message_id)
 
 @dp.callback_query(F.data == "menu_balance")
@@ -1872,8 +1882,9 @@ async def cb_balance(call: CallbackQuery, state: FSMContext):
     
     try:
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set, ultra_set))
-    except Exception:
-        await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set, ultra_set))
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_balance_inline_keyboard(upi_set, usdt_set, ultra_set))
     await state.update_data(last_menu_msg_id=call.message.message_id)
 
 @dp.callback_query(F.data == "menu_sell_gmail")
@@ -1893,8 +1904,9 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
     )
     try:
         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
-    except:
-        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     await state.update_data(last_menu_msg_id=call.message.message_id)
 
 @dp.message(UserState.selling_username, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
@@ -2041,8 +2053,9 @@ async def cb_history(event: CallbackQuery | Message, state: FSMContext):
     if isinstance(event, CallbackQuery):
         try:
             await event.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
-        except Exception:
-            await event.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e):
+                await event.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
     else:
         sent_msg = await event.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
         await state.update_data(last_menu_msg_id=sent_msg.message_id)
@@ -2069,8 +2082,9 @@ async def cb_support_start(call: CallbackQuery, state: FSMContext):
     )
     try:
         await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
-    except Exception:
-        await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
 
 @dp.message(UserState.waiting_for_support, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS) if F.text else True)
 async def process_user_support_message(message: Message, state: FSMContext):
@@ -3066,8 +3080,9 @@ async def cb_admin_view_pending_sells(call: CallbackQuery):
     if not sell_rows:
         try:
             await call.message.edit_text("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML)
-        except Exception:
-            await call.message.answer("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML)
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e):
+                await call.message.answer("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML)
         return
 
     await call.message.answer(f"📨 <b>Displaying {len(sell_rows)} pending Gmail sell request(s):</b>", parse_mode=ParseMode.HTML)
@@ -3126,8 +3141,9 @@ async def cb_admin_view_pending_tasks(call: CallbackQuery):
     if not task_rows:
         try:
             await call.message.edit_text("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML)
-        except Exception:
-            await call.message.answer("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML)
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e):
+                await call.message.answer("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML)
         return
 
     await call.message.answer(f"✍️ <b>Displaying {len(task_rows)} pending task submission(s):</b>", parse_mode=ParseMode.HTML)
@@ -3225,8 +3241,9 @@ async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
     if not withdraw_rows:
         try:
             await call.message.edit_text(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML)
-        except Exception:
-            await call.message.answer(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML)
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e):
+                await call.message.answer(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML)
         return
 
     await call.message.answer(f"💸 <b>Displaying {len(withdraw_rows)} pending withdrawal request(s) for {display_label}:</b>", parse_mode=ParseMode.HTML)
@@ -3620,8 +3637,9 @@ async def start_unassign_all_users(call: CallbackQuery, state: FSMContext):
         if not active_assignments:
             try:
                 await call.message.edit_text("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML)
-            except Exception:
-                await call.message.answer("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML)
+            except TelegramBadRequest as e:
+                if "message is not modified" not in str(e):
+                    await call.message.answer("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML)
             return
 
         task_ids = [r['task_id'] for r in active_assignments]
@@ -3643,8 +3661,9 @@ async def start_unassign_all_users(call: CallbackQuery, state: FSMContext):
     count = len(task_ids)
     try:
         await call.message.edit_text(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML)
-    except Exception:
-        await call.message.answer(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML)
 
     for r in active_assignments:
         uid = r['user_id']
@@ -4183,13 +4202,16 @@ async def process_broadcast_target_selection(call: CallbackQuery, state: FSMCont
             f"Total targets: <b>{total_users}</b>",
             parse_mode=ParseMode.HTML
         )
-    except Exception:
-        status_msg = await call.message.answer(
-            f"⏳ <b>Broadcast in progress...</b>\n"
-            f"🎯 Target: <b>{label}</b>\n"
-            f"Total targets: <b>{total_users}</b>",
-            parse_mode=ParseMode.HTML
-        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            status_msg = await call.message.answer(
+                f"⏳ <b>Broadcast in progress...</b>\n"
+                f"🎯 Target: <b>{label}</b>\n"
+                f"Total targets: <b>{total_users}</b>",
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            status_msg = call.message
 
     success_count = 0
     fail_count = 0
@@ -4940,8 +4962,9 @@ async def inline_withdraw_ultra_handler(call: CallbackQuery):
         )
         try:
             await call.message.edit_text(msg_text, parse_mode=ParseMode.HTML)
-        except Exception:
-            await call.message.answer(msg_text, parse_mode=ParseMode.HTML)
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e):
+                await call.message.answer(msg_text, parse_mode=ParseMode.HTML)
     else:
         fail_msg = (
             f"❌ <b>Ultra Gateway Instant Payment Failed!</b>\n\n"
@@ -4951,8 +4974,9 @@ async def inline_withdraw_ultra_handler(call: CallbackQuery):
         )
         try:
             await call.message.edit_text(fail_msg, parse_mode=ParseMode.HTML)
-        except Exception:
-            await call.message.answer(fail_msg, parse_mode=ParseMode.HTML)
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e):
+                await call.message.answer(fail_msg, parse_mode=ParseMode.HTML)
 
 @dp.callback_query(F.data == "user_submit_task")
 async def inline_submit_task(call: CallbackQuery, state: FSMContext):
