@@ -519,6 +519,19 @@ async def load_settings_and_cache():
 def invalidate_user_cache(user_id: int):
     USER_CACHE.pop(user_id, None)
 
+async def cleanup_last_menu(message: Message, state: FSMContext):
+    """Deletes the previous prompt/menu message (tracked via 'last_menu_msg_id')
+    before a flow's completion reply is sent. This is what stops the bot from
+    showing a stale prompt (with its old Cancel/Back button) at the same time
+    as a brand-new confirmation+menu message — i.e. the 'double menu' bug."""
+    data = await state.get_data()
+    old_msg_id = data.get('last_menu_msg_id')
+    if old_msg_id:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=old_msg_id)
+        except Exception:
+            pass
+
 async def update_last_active(user_id: int):
     try:
         async with db_pool.acquire() as conn:
@@ -558,13 +571,19 @@ async def ensure_user(user_id: int, referrer_id: int = None, conn=None) -> bool:
     return is_new
 
 async def get_user_data(user_id: int):
+    cached = USER_CACHE.get(user_id)
+    if cached is not None:
+        return cached
     await ensure_user(user_id)
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT balance, upi, usdt_address, ultra_number, notifications_enabled, currency, referred_by, referral_earnings FROM users WHERE user_id=$1", 
             user_id
         )
-        return dict(row) if row else None
+        data = dict(row) if row else None
+        if data is not None:
+            USER_CACHE[user_id] = data
+        return data
 
 async def is_banned(user_id: int) -> bool:
     return user_id in BANNED_USERS_CACHE
@@ -1911,6 +1930,7 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
 
 @dp.message(UserState.selling_username, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_username(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     if not SELL_GMAIL_STATUS:
         await message.answer("⚠️ Selling Gmail is currently disabled by Admin!", reply_markup=get_main_menu_keyboard())
         await state.clear()
@@ -1945,12 +1965,13 @@ async def process_sell_username(message: Message, state: FSMContext):
 
     is_valid = await is_gmail_registered(username, user_id=message.from_user.id)
     if not is_valid:
-        await message.answer(
+        retry_msg = await message.answer(
             f"❌ This Gmail account ({username}) does not exist on Google!\n\n"
             f"Please Provide Valid Gmail Username, then try again.",
             parse_mode=ParseMode.HTML,
             reply_markup=get_back_inline_keyboard()
         )
+        await state.update_data(last_menu_msg_id=retry_msg.message_id)
         return
 
     await state.update_data(sell_username=username)
@@ -1964,6 +1985,7 @@ async def process_sell_username(message: Message, state: FSMContext):
 
 @dp.message(UserState.selling_password, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_password(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     if not SELL_GMAIL_STATUS:
         await message.answer("⚠️ Selling Gmail is currently disabled by Admin!", reply_markup=get_main_menu_keyboard())
         await state.clear()
@@ -2085,9 +2107,11 @@ async def cb_support_start(call: CallbackQuery, state: FSMContext):
     except TelegramBadRequest as e:
         if "message is not modified" not in str(e):
             await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_support_cancel_keyboard())
+    await state.update_data(last_menu_msg_id=call.message.message_id)
 
 @dp.message(UserState.waiting_for_support, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS) if F.text else True)
 async def process_user_support_message(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     user_id = message.from_user.id
     username = f"@{message.from_user.username}" if message.from_user.username else f"ID: {user_id}"
 
@@ -2250,6 +2274,7 @@ async def cb_admin_reply_support(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_support_reply, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS) if F.text else True)
 async def process_admin_support_reply(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     data = await state.get_data()
     target_user_id = data.get('reply_target_user_id')
 
@@ -2295,6 +2320,7 @@ async def process_admin_support_reply(message: Message, state: FSMContext):
 
 @dp.message(UserState.setting_upi, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_setting_upi(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     upi_input = message.text.strip()
     user_id = message.from_user.id
 
@@ -2311,6 +2337,7 @@ async def process_setting_upi(message: Message, state: FSMContext):
 
 @dp.message(UserState.setting_usdt, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_setting_usdt(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     usdt_input = message.text.strip()
     user_id = message.from_user.id
 
@@ -2327,6 +2354,7 @@ async def process_setting_usdt(message: Message, state: FSMContext):
 
 @dp.message(UserState.setting_ultra, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_setting_ultra(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     ultra_input = message.text.strip()
     user_id = message.from_user.id
 
@@ -2779,6 +2807,7 @@ async def cb_admin_validator_change_key(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_validator_key, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_change_validator_key(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     global EMAILABLE_API_KEY
     new_key = message.text.strip()
 
@@ -2816,6 +2845,7 @@ async def admin_btn_transfer_admin(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_transfer_admin_id, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_transfer_admin_id_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     global ADMIN_ID
     try:
         new_admin_id = int(message.text.strip())
@@ -2890,6 +2920,7 @@ async def cb_admin_add_task_bulk(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_bulk_add_task, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_bulk_add_task_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     raw_text = message.text.strip()
     raw_lines = re.split(r'[\n,\s]+', raw_text)
     
@@ -2952,6 +2983,7 @@ async def process_bulk_add_task_step(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_add_task, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_add_task_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     username_input = message.text.strip()
     username = f"{username_input}@gmail.com" if "@" not in username_input else username_input
     
@@ -3292,6 +3324,7 @@ async def admin_btn_chat(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_chat_user_id, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_chat_user_id_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     try:
         target_user_id = int(message.text.strip())
         await state.update_data(chat_target_user_id=target_user_id)
@@ -3303,6 +3336,7 @@ async def process_chat_user_id_step(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_chat_message, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS))
 async def process_chat_message_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     data = await state.get_data()
     target_user_id = data.get('chat_target_user_id')
 
@@ -3375,6 +3409,7 @@ async def cb_admin_cancel_sell_by_id(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_cancel_sell_by_id_target, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_cancel_sell_by_id_target_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     try:
         target_id = int(message.text.strip())
         await state.update_data(target_sell_id=target_id)
@@ -3390,6 +3425,7 @@ async def process_cancel_sell_by_id_target_step(message: Message, state: FSMCont
 
 @dp.message(AdminState.waiting_for_cancel_sell_by_id_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_cancel_sell_by_id_reason_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     data = await state.get_data()
     target_id = data.get('target_sell_id')
     reason = message.text.strip()
@@ -3429,6 +3465,7 @@ async def process_cancel_sell_by_id_reason_step(message: Message, state: FSMCont
 
 @dp.message(AdminState.waiting_for_bulk_cancel_sell_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_bulk_cancel_sell_reason_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     reason = message.text.strip()
     
     async with db_pool.acquire() as conn:
@@ -3503,6 +3540,7 @@ async def cb_admin_cancel_task_by_id(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_cancel_task_by_id_target, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_cancel_task_by_id_target_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     try:
         target_id = int(message.text.strip())
         await state.update_data(target_task_id=target_id)
@@ -3518,6 +3556,7 @@ async def process_cancel_task_by_id_target_step(message: Message, state: FSMCont
 
 @dp.message(AdminState.waiting_for_cancel_task_by_id_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_cancel_task_by_id_reason_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     data = await state.get_data()
     target_id = data.get('target_task_id')
     reason = message.text.strip()
@@ -3562,6 +3601,7 @@ async def process_cancel_task_by_id_reason_step(message: Message, state: FSMCont
 
 @dp.message(AdminState.waiting_for_bulk_cancel_task_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_bulk_cancel_task_reason_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     reason = message.text.strip()
 
     async with db_pool.acquire() as conn:
@@ -3683,6 +3723,7 @@ async def start_unassign_all_users(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_unassign_user_id, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_unassign_user_id_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     try:
         target_id = int(message.text.strip())
         async with db_pool.acquire() as conn:
@@ -3743,6 +3784,7 @@ async def admin_btn_find_id(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_find_id_query, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_find_id_query_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     query = message.text.strip().lower()
     search_pattern = f"%{query}%"
 
@@ -3884,6 +3926,7 @@ async def admin_btn_add_balance(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_add_balance, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_add_balance_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     try:
         parts = message.text.strip().split()
         target_id = int(parts[0])
@@ -3916,6 +3959,7 @@ async def admin_btn_cut_balance(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_cut_balance, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_cut_balance_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     try:
         parts = message.text.strip().split()
         target_id = int(parts[0])
@@ -3953,6 +3997,7 @@ async def admin_btn_check_balance(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_check_balance, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_check_balance_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     try:
         target_id = int(message.text.strip())
         user_data = await get_user_data(target_id)
@@ -4004,6 +4049,7 @@ async def admin_btn_transactions(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_user_transactions, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_user_transactions_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     try:
         target_id = int(message.text.strip())
         text, reply_markup = await render_transaction_history_page(target_id, page=1, is_admin=True)
@@ -4065,6 +4111,7 @@ async def admin_btn_ban_user(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_ban_user, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_ban_user_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     try:
         target_id = int(message.text.strip())
         if target_id == ADMIN_ID:
@@ -4095,6 +4142,7 @@ async def admin_btn_unban_user(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_unban_user, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_unban_user_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     try:
         target_id = int(message.text.strip())
 
@@ -4121,6 +4169,7 @@ async def admin_btn_broadcast(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_broadcast, ~F.text.in_(MENU_BUTTONS))
 async def process_broadcast_message(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     if message.from_user.id != ADMIN_ID:
         return
 
@@ -4406,6 +4455,7 @@ async def cb_admin_change_tasks_rate(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_change_tasks_rate, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_change_tasks_rate_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     global DEFAULT_TASK_RATE
     try:
         new_rate = float(message.text.strip())
@@ -4438,6 +4488,7 @@ async def cb_admin_change_sell_rate(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_change_sell_rate, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_change_sell_rate_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     global GMAIL_SELL_RATE
     try:
         new_rate = float(message.text.strip())
@@ -4469,6 +4520,7 @@ async def cb_admin_change_min_withdraw(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_change_min_withdraw, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_change_min_withdraw_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     global MIN_WITHDRAWAL_AMT
     try:
         new_min = float(message.text.strip())
@@ -4500,6 +4552,7 @@ async def cb_admin_change_task_pass(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_change_task_pass, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_change_task_pass_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     global DEFAULT_TASK_PASS
     new_pass = message.text.strip()
     if not new_pass:
@@ -4540,6 +4593,7 @@ async def cb_admin_change_fees(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_change_fees, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_change_fees_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     global UPI_FEES, USDT_FEES, ULTRA_FEES
     lines = message.text.strip().split('\n')
     
@@ -4592,6 +4646,7 @@ async def cb_admin_change_ultra(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_change_ultra_token, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_change_ultra_token_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     global ULTRA_TOKEN, ULTRA_KEY
     parts = message.text.strip().split()
     
@@ -4624,6 +4679,7 @@ async def admin_btn_remove_task(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_remove_task, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_remove_task_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     try:
         task_id = int(message.text.strip())
         async with db_pool.acquire() as conn:
@@ -4656,6 +4712,7 @@ async def set_must_join_command(message: Message, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_channel_link, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_must_join_channel_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     global MUST_JOIN_CHANNEL
     val = message.text.strip()
 
@@ -5022,6 +5079,7 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
 
 @dp.message(UserState.submitting_task, F.photo | F.text, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS) if F.text else True)
 async def handle_task_submission(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
         task = await conn.fetchrow('''
@@ -5202,6 +5260,7 @@ async def decline_sell_unified(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_sell_reject_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_reject_reason(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     data = await state.get_data()
     sell_id = data.get('sell_id')
     user_id = data['user_id']
@@ -5323,6 +5382,7 @@ async def decline_task(call: CallbackQuery, state: FSMContext):
 
 @dp.message(AdminState.waiting_for_task_reject_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_task_reject_reason(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
     data = await state.get_data()
     task_id = data['task_id']
     user_id = data['user_id']
