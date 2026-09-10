@@ -45,6 +45,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 db_pool = None
+HTTP_SESSION = None  # shared aiohttp session (reused across requests for speed)
 BANNED_USERS_CACHE = set()
 SUPPORT_REQUESTS_CACHE = {}  # In-memory store: {user_id: {"username": str, "message": str}}
 MUST_JOIN_CHANNEL = None
@@ -159,7 +160,9 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
     is_valid_email = False
 
     try:
-        async with aiohttp.ClientSession() as session:
+        session = HTTP_SESSION if HTTP_SESSION and not HTTP_SESSION.closed else aiohttp.ClientSession()
+        _own_session = session is not HTTP_SESSION
+        try:
             if VALIDATOR_PROVIDER == "netnit":
                 url = "https://apikey.netnit.net/fastcheck"
                 headers = {
@@ -209,6 +212,9 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
                                     is_valid_email = True
                     else:
                         print(f"Validator HTTP Error ({VALIDATOR_PROVIDER}): {resp.status}")
+        finally:
+            if _own_session:
+                await session.close()
     except Exception as e:
         print(f"Validator Exception ({VALIDATOR_PROVIDER}): {e}")
 
@@ -299,7 +305,7 @@ async def init_db():
     db_pool = await asyncpg.create_pool(
         dsn=url, 
         ssl='require', 
-        min_size=3, 
+        min_size=5, 
         max_size=15,
         timeout=10.0,
         command_timeout=10.0,
@@ -3111,10 +3117,10 @@ async def cb_admin_view_pending_sells(call: CallbackQuery):
 
     if not sell_rows:
         try:
-            await call.message.edit_text("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML)
+            await call.message.edit_text("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e):
-                await call.message.answer("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML)
+                await call.message.answer("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
         return
 
     await call.message.answer(f"📨 <b>Displaying {len(sell_rows)} pending Gmail sell request(s):</b>", parse_mode=ParseMode.HTML)
@@ -3172,10 +3178,10 @@ async def cb_admin_view_pending_tasks(call: CallbackQuery):
 
     if not task_rows:
         try:
-            await call.message.edit_text("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML)
+            await call.message.edit_text("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e):
-                await call.message.answer("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML)
+                await call.message.answer("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
         return
 
     await call.message.answer(f"✍️ <b>Displaying {len(task_rows)} pending task submission(s):</b>", parse_mode=ParseMode.HTML)
@@ -3272,10 +3278,10 @@ async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
 
     if not withdraw_rows:
         try:
-            await call.message.edit_text(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML)
+            await call.message.edit_text(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e):
-                await call.message.answer(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML)
+                await call.message.answer(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
         return
 
     await call.message.answer(f"💸 <b>Displaying {len(withdraw_rows)} pending withdrawal request(s) for {display_label}:</b>", parse_mode=ParseMode.HTML)
@@ -3676,10 +3682,10 @@ async def start_unassign_all_users(call: CallbackQuery, state: FSMContext):
 
         if not active_assignments:
             try:
-                await call.message.edit_text("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML)
+                await call.message.edit_text("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
             except TelegramBadRequest as e:
                 if "message is not modified" not in str(e):
-                    await call.message.answer("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML)
+                    await call.message.answer("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
             return
 
         task_ids = [r['task_id'] for r in active_assignments]
@@ -3700,10 +3706,10 @@ async def start_unassign_all_users(call: CallbackQuery, state: FSMContext):
 
     count = len(task_ids)
     try:
-        await call.message.edit_text(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML)
+        await call.message.edit_text(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     except TelegramBadRequest as e:
         if "message is not modified" not in str(e):
-            await call.message.answer(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML)
+            await call.message.answer(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
 
     for r in active_assignments:
         uid = r['user_id']
@@ -4236,7 +4242,8 @@ async def process_broadcast_target_selection(call: CallbackQuery, state: FSMCont
         try:
             await call.message.edit_text(
                 f"📭 No users found for: <b>{label}</b>",
-                parse_mode=ParseMode.HTML
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_back_inline_keyboard()
             )
         except Exception:
             pass
@@ -4299,7 +4306,8 @@ async def process_broadcast_target_selection(call: CallbackQuery, state: FSMCont
         f"📊 <b>Total Users Processed:</b> {total_users}\n"
         f"🟢 <b>Successfully Sent:</b> {success_count}\n"
         f"🔴 <b>Failed / Blocked:</b> {fail_count}",
-        parse_mode=ParseMode.HTML
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_back_inline_keyboard()
     )
     await bot.send_message(
         ADMIN_ID,
@@ -4861,7 +4869,8 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
             f'💰 <b>Net Payout:</b> {payout_display}\n'
             f'🏷 <b>Deducted Fee:</b> {fee_display}\n'
             f'🏦 <b>UPI ID:</b> <code>{upi}</code>',
-            parse_mode=ParseMode.HTML
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_back_inline_keyboard()
         )
     except Exception as e:
         print(f"Error editing withdraw msg: {e}")
@@ -4944,7 +4953,8 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
             f'💰 <b>Net Payout:</b> {payout_display} (~${usdt_amount:.2f} USDT)\n'
             f'🏷 <b>Deducted Fee:</b> {fee_display}\n'
             f'🪙 <b>USDT Address:</b> <code>{usdt}</code>',
-            parse_mode=ParseMode.HTML
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_back_inline_keyboard()
         )
     except Exception as e:
         print(f"Error editing withdraw msg: {e}")
@@ -4981,7 +4991,9 @@ async def inline_withdraw_ultra_handler(call: CallbackQuery):
     api_reason = "Unknown Error"
 
     try:
-        async with aiohttp.ClientSession() as session:
+        session = HTTP_SESSION if HTTP_SESSION and not HTTP_SESSION.closed else aiohttp.ClientSession()
+        _own_session = session is not HTTP_SESSION
+        try:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=15.0)) as resp:
                 raw_text = await resp.text()
                 try:
@@ -4997,6 +5009,9 @@ async def inline_withdraw_ultra_handler(call: CallbackQuery):
                         api_reason = res_data.get("message") or res_data.get("msg") or raw_text
                 else:
                     api_reason = f"HTTP Error {resp.status}: {raw_text}"
+        finally:
+            if _own_session:
+                await session.close()
     except Exception as e:
         api_reason = f"Connection error: {e}"
 
@@ -5018,10 +5033,10 @@ async def inline_withdraw_ultra_handler(call: CallbackQuery):
             f"🌐 <i>Gateway:</i> https://ultra-pay.store"
         )
         try:
-            await call.message.edit_text(msg_text, parse_mode=ParseMode.HTML)
+            await call.message.edit_text(msg_text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e):
-                await call.message.answer(msg_text, parse_mode=ParseMode.HTML)
+                await call.message.answer(msg_text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     else:
         fail_msg = (
             f"❌ <b>Ultra Gateway Instant Payment Failed!</b>\n\n"
@@ -5030,10 +5045,10 @@ async def inline_withdraw_ultra_handler(call: CallbackQuery):
             f"🌐 <i>Gateway link:</i> https://ultra-pay.store"
         )
         try:
-            await call.message.edit_text(fail_msg, parse_mode=ParseMode.HTML)
+            await call.message.edit_text(fail_msg, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e):
-                await call.message.answer(fail_msg, parse_mode=ParseMode.HTML)
+                await call.message.answer(fail_msg, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
 
 @dp.callback_query(F.data == "user_submit_task")
 async def inline_submit_task(call: CallbackQuery, state: FSMContext):
@@ -5073,9 +5088,18 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
             await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
             
     try:
-        await call.message.edit_text(f'✅ Task #{task_id} has been cancelled and returned to the pool.', parse_mode=ParseMode.HTML)
-    except Exception:
-        pass
+        await call.message.edit_text(
+            f'✅ Task #{task_id} has been cancelled and returned to the pool.',
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_back_inline_keyboard()
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(
+                f'✅ Task #{task_id} has been cancelled and returned to the pool.',
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_back_inline_keyboard()
+            )
 
 @dp.message(UserState.submitting_task, F.photo | F.text, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS) if F.text else True)
 async def handle_task_submission(message: Message, state: FSMContext):
@@ -5585,8 +5609,10 @@ async def auto_expire_tasks():
 # ============================================
 
 async def main():
+    global HTTP_SESSION
     await init_db()
     await load_settings_and_cache()
+    HTTP_SESSION = aiohttp.ClientSession()
     asyncio.create_task(auto_expire_tasks())
     
     server_thread = Thread(target=run_flask)
@@ -5594,7 +5620,11 @@ async def main():
     server_thread.start()
     
     print('🤖 Bot connected to Supabase PostgreSQL and polling 24/7 on Render...')
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        if HTTP_SESSION:
+            await HTTP_SESSION.close()
 
 if __name__ == '__main__':
     asyncio.run(main())
