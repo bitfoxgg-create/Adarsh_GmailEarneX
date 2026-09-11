@@ -1,15 +1,14 @@
 import asyncio
 from datetime import datetime, timedelta
 import os
-from threading import Thread
 import urllib.parse
 import time
 import re
 import json
 import secrets
 import string
-from flask import Flask
 import aiohttp
+from aiohttp import web
 
 import asyncpg
 from aiogram import Bot, Dispatcher, F
@@ -28,6 +27,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 # ============================================
 # CONFIGURATION & INITIALIZATION
@@ -37,6 +37,13 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPT
 ADMIN_ID = int(os.environ.get('ADMIN_ID', 8856827908))
 DATABASE_URL = os.environ.get('DATABASE_URL')
 WORKER_BOT_TOKEN = os.environ.get('WORKER_BOT_TOKEN', '').strip()
+
+# Webhook configuration (fast path). If WEBHOOK_URL / RENDER_EXTERNAL_URL isn't set,
+# the bot automatically falls back to the old long-polling behavior below.
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', 'change_this_secret')
+_base_url = (os.environ.get('WEBHOOK_URL') or os.environ.get('RENDER_EXTERNAL_URL', '')).rstrip('/')
+WEBHOOK_URL = f"{_base_url}{WEBHOOK_PATH}" if _base_url else None
 
 # Currency Conversion Rate (1 USD/USDT = 96.30 INR)
 USD_TO_INR = 96.30
@@ -227,18 +234,11 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
     return is_valid_email
 
 # ============================================
-# DUMMY FLASK SERVER FOR RENDER KEEP-ALIVE
+# AIOHTTP SERVER (health check + webhook fast-path)
 # ============================================
 
-flask_app = Flask('')
-
-@flask_app.route('/')
-def home():
-    return "Bot is running!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    flask_app.run(host='0.0.0.0', port=port)
+async def health(request):
+    return web.Response(text="Bot is running!")
 
 # ============================================
 # STATES
@@ -538,7 +538,13 @@ async def cleanup_last_menu(message: Message, state: FSMContext):
         except Exception:
             pass
 
+_LAST_ACTIVE_WRITE = {}  # {user_id: last_write_timestamp} - throttles redundant writes
+
 async def update_last_active(user_id: int):
+    now = time.time()
+    if now - _LAST_ACTIVE_WRITE.get(user_id, 0) < 60:
+        return  # already written within the last minute - broadcast windows are hour-based, so this is lossless
+    _LAST_ACTIVE_WRITE[user_id] = now
     try:
         async with db_pool.acquire() as conn:
             await conn.execute(
@@ -5608,23 +5614,63 @@ async def auto_expire_tasks():
 # LONG POLLING INITIALIZER WITH FLASK THREAD
 # ============================================
 
+async def on_startup(app: web.Application):
+    await bot.set_webhook(
+        WEBHOOK_URL,
+        secret_token=WEBHOOK_SECRET,
+        drop_pending_updates=True,
+        allowed_updates=dp.resolve_used_update_types()
+    )
+    print(f'🤖 Webhook set: {WEBHOOK_URL}')
+
+async def on_shutdown(app: web.Application):
+    if HTTP_SESSION:
+        await HTTP_SESSION.close()
+
 async def main():
     global HTTP_SESSION
     await init_db()
     await load_settings_and_cache()
     HTTP_SESSION = aiohttp.ClientSession()
     asyncio.create_task(auto_expire_tasks())
-    
-    server_thread = Thread(target=run_flask)
-    server_thread.daemon = True
-    server_thread.start()
-    
-    print('🤖 Bot connected to Supabase PostgreSQL and polling 24/7 on Render...')
-    try:
-        await dp.start_polling(bot)
-    finally:
-        if HTTP_SESSION:
-            await HTTP_SESSION.close()
+
+    port = int(os.environ.get("PORT", 8080))
+
+    if WEBHOOK_URL:
+        # FAST PATH: Telegram pushes updates to us directly - removes the getUpdates round-trip
+        app = web.Application()
+        app.router.add_get('/', health)
+        SimpleRequestHandler(
+            dispatcher=dp,
+            bot=bot,
+            secret_token=WEBHOOK_SECRET
+        ).register(app, path=WEBHOOK_PATH)
+        setup_application(app, dp, bot=bot)
+        app.on_startup.append(on_startup)
+        app.on_shutdown.append(on_shutdown)
+
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, host='0.0.0.0', port=port)
+        await site.start()
+        print(f'🤖 Bot connected to Supabase PostgreSQL and running via WEBHOOK on Render (port {port})...')
+        while True:
+            await asyncio.sleep(3600)
+    else:
+        # FALLBACK: WEBHOOK_URL not set -> behaves exactly like the original long-polling bot
+        app = web.Application()
+        app.router.add_get('/', health)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, host='0.0.0.0', port=port)
+        await site.start()
+
+        print('🤖 Bot connected to Supabase PostgreSQL and polling 24/7 on Render...')
+        try:
+            await dp.start_polling(bot)
+        finally:
+            if HTTP_SESSION:
+                await HTTP_SESSION.close()
 
 if __name__ == '__main__':
     asyncio.run(main())
