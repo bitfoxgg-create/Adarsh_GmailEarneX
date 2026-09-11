@@ -227,7 +227,10 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
 
     if verify_msg:
         try:
-            await verify_msg.delete()
+            if is_valid_email:
+                await verify_msg.edit_text("✅<i>Gmail Verified Successfully!</i>🎉", parse_mode=ParseMode.HTML)
+            else:
+                await verify_msg.edit_text("❌<i>Gmail Verification Failed - Account Not Found!</i>", parse_mode=ParseMode.HTML)
         except Exception:
             pass
 
@@ -1942,7 +1945,6 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
 
 @dp.message(UserState.selling_username, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_sell_username(message: Message, state: FSMContext):
-    await cleanup_last_menu(message, state)
     if not SELL_GMAIL_STATUS:
         await message.answer("⚠️ Selling Gmail is currently disabled by Admin!", reply_markup=get_main_menu_keyboard())
         await state.clear()
@@ -1985,6 +1987,9 @@ async def process_sell_username(message: Message, state: FSMContext):
         )
         await state.update_data(last_menu_msg_id=retry_msg.message_id)
         return
+
+    # Only remove the previous prompt now that validation has actually succeeded
+    await cleanup_last_menu(message, state)
 
     await state.update_data(sell_username=username)
     await state.set_state(UserState.selling_password)
@@ -5109,7 +5114,6 @@ async def inline_cancel_task(call: CallbackQuery, state: FSMContext):
 
 @dp.message(UserState.submitting_task, F.photo | F.text, ~F.text.startswith("/") if F.text else True, ~F.text.in_(MENU_BUTTONS) if F.text else True)
 async def handle_task_submission(message: Message, state: FSMContext):
-    await cleanup_last_menu(message, state)
     user_id = message.from_user.id
     async with db_pool.acquire() as conn:
         task = await conn.fetchrow('''
@@ -5149,6 +5153,9 @@ async def handle_task_submission(message: Message, state: FSMContext):
             parse_mode=ParseMode.HTML
         )
         return
+
+    # Only remove the task card now that validation has actually succeeded
+    await cleanup_last_menu(message, state)
 
     async with db_pool.acquire() as conn:
         await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
