@@ -33,8 +33,13 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 # CONFIGURATION & INITIALIZATION
 # ============================================
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '8970788656:AAGmGCBKEAhNSpaW0YTv7zztcLPTTQwYRGo')
-ADMIN_ID = int(os.environ.get('ADMIN_ID', 8856827908))
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN environment variable is not set. Set it before starting the bot (never hardcode it in source).")
+_admin_id_raw = os.environ.get('ADMIN_ID')
+if not _admin_id_raw:
+    raise RuntimeError("ADMIN_ID environment variable is not set. Set it before starting the bot.")
+ADMIN_ID = int(_admin_id_raw)
 DATABASE_URL = os.environ.get('DATABASE_URL')
 WORKER_BOT_TOKEN = os.environ.get('WORKER_BOT_TOKEN', '').strip()
 
@@ -58,6 +63,7 @@ SUPPORT_REQUESTS_CACHE = {}  # In-memory store: {user_id: {"username": str, "mes
 MUST_JOIN_CHANNEL = None
 BOT_USERNAME = "GmailEarnexBot"
 BOT_STATUS = True           # True = ON, False = OFF
+BOT_OFF_MESSAGE = "⚠️ Bot is Currently Off, Wait For Admin To On The Bot"   # Shown to users while bot is OFF; admin can customize it
 REF_STATUS = True           # True = ON, False = OFF (Silent Referral Disabling)
 ULTRA_STATUS = True         # True = ON, False = OFF
 SINGLE_TASK_STATUS = True   # True = 1/1 task (must wait for review), False = Unlimited tasks concurrently
@@ -98,7 +104,7 @@ USER_CACHE = {}       # {user_id: dict_data}
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
     "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "👥 Referrals", "📁 My Accounts", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
-    "➕ Add Task", "📋 Tasks", "🟢 Available Tasks", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🚫 Cancel Sell", "🚫 Cancel Task", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
+    "➕ Add Task", "📋 Tasks", "🟢 Available Tasks", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "⚙️ Change Values", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "⚙️ Validator", "👑 Transfer Admin",
@@ -290,17 +296,12 @@ class AdminState(StatesGroup):
     waiting_for_change_task_pass = State()
     waiting_for_change_fees = State()
     waiting_for_change_ultra_token = State()
-    waiting_for_bulk_cancel_sell_reason = State()
-    waiting_for_bulk_cancel_task_reason = State()
-    waiting_for_cancel_sell_by_id_target = State()
-    waiting_for_cancel_sell_by_id_reason = State()
-    waiting_for_cancel_task_by_id_target = State()
-    waiting_for_cancel_task_by_id_reason = State()
     waiting_for_giveaway_message = State()
     waiting_for_giveaway_emoji = State()
     waiting_for_giveaway_target = State()
     waiting_for_dustbin_replace = State()
     waiting_for_video_link = State()
+    waiting_for_bot_off_message = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -376,6 +377,9 @@ async def init_db():
         ''')
         await conn.execute("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS method TEXT DEFAULT 'UPI'")
         await conn.execute("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS payment_address TEXT")
+        # Guarantees at the database level that a user can never have two 'pending' withdrawals
+        # at once, even if two requests race past an in-app check at the same instant.
+        await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_withdrawals_one_pending_per_user ON withdrawals (user_id) WHERE status = 'pending'")
         
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS tasks (
@@ -474,7 +478,7 @@ async def init_db():
         ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, BOT_OFF_MESSAGE, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
     global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS, DEFAULT_TASK_PASS_STATUS, UPI_FEES, USDT_FEES, ULTRA_FEES, ULTRA_TOKEN, ULTRA_KEY
     global TASK_VIDEO_LINK, SELL_VIDEO_LINK, HOWTO_VIDEO_LINK
     
@@ -487,6 +491,10 @@ async def load_settings_and_cache():
 
         status_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='bot_status'")
         BOT_STATUS = (status_val != 'off')
+
+        off_msg_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='bot_off_message'")
+        if off_msg_val:
+            BOT_OFF_MESSAGE = off_msg_val
 
         ref_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='ref_status'")
         REF_STATUS = (ref_val != 'off')
@@ -818,9 +826,6 @@ def get_admin_menu_keyboard():
     kb.button(text="💬 Chat", style="primary")
     
     kb.button(text="🗑 Unassign Tasks", style="danger")
-    kb.button(text="🚫 Cancel Sell", style="danger")
-    
-    kb.button(text="🚫 Cancel Task", style="danger")
     kb.button(text="🔍 Find ID", style="primary")
     
     kb.button(text="➕ Add Balance", style="success")
@@ -854,22 +859,8 @@ def get_admin_menu_keyboard():
 
     kb.button(text="🏠 Main Menu", style="primary")
     
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
-
-def get_cancel_sell_options_keyboard():
-    kb = InlineKeyboardBuilder()
-    kb.button(text="Cancel All", callback_data="admin_cancel_sell_all", style="danger")
-    kb.button(text="Cancel By Id", callback_data="admin_cancel_sell_by_id", style="primary")
-    kb.adjust(2)
-    return kb.as_markup()
-
-def get_cancel_task_options_keyboard():
-    kb = InlineKeyboardBuilder()
-    kb.button(text="Cancel All", callback_data="admin_cancel_task_all", style="danger")
-    kb.button(text="Cancel By Id", callback_data="admin_cancel_task_by_id", style="primary")
-    kb.adjust(2)
-    return kb.as_markup()
 
 def get_pending_reviews_inline_keyboard():
     kb = InlineKeyboardBuilder()
@@ -1378,7 +1369,7 @@ async def global_message_middleware(handler, event: Message, data):
         return await handler(event, data)
         
     if not BOT_STATUS:
-        await event.answer("⚠️ Bot is Currently Off, Wait For Admin To On The Bot")
+        await event.answer(BOT_OFF_MESSAGE)
         return
 
     if await is_banned(user_id):
@@ -1410,7 +1401,7 @@ async def global_callback_middleware(handler, event: CallbackQuery, data):
         
     if not BOT_STATUS:
         try:
-            await event.answer("⚠️ Bot is Currently Off, Wait For Admin To On The Bot", show_alert=True)
+            await event.answer(BOT_OFF_MESSAGE, show_alert=True)
         except Exception:
             pass
         return
@@ -2765,6 +2756,51 @@ async def admin_btn_toggle_ultra_status(message: Message, state: FSMContext):
     status_str = "🟢 <b>Ultra Gateway is now ON and available in withdrawal options!</b>" if ULTRA_STATUS else "🔴 <b>Ultra Gateway is now OFF and hidden from withdrawal options!</b>"
     await message.answer(status_str, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
 
+@dp.message(F.text.in_({"🔴 Bot Status: OFF", "🟢 Bot Status: ON"}), StateFilter("*"))
+async def admin_btn_toggle_bot_status(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    global BOT_STATUS
+
+    if BOT_STATUS:
+        # Bot is currently ON -> admin wants to turn it OFF. Ask for the message to show users first.
+        await state.clear()
+        await state.set_state(AdminState.waiting_for_bot_off_message)
+        await message.answer(
+            "🔴 <b>Turning the Bot OFF</b>\n\n"
+            "Send the message you want shown to all users while the bot is off:",
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    # Bot is currently OFF -> admin wants to turn it back ON.
+    BOT_STATUS = True
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('bot_status', 'on') ON CONFLICT (key) DO UPDATE SET value = 'on'")
+
+    await message.answer("🟢 <b>Bot is now ON and accessible to all users!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+
+@dp.message(AdminState.waiting_for_bot_off_message, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_bot_off_message(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    global BOT_STATUS, BOT_OFF_MESSAGE
+    BOT_OFF_MESSAGE = message.text.strip()
+    BOT_STATUS = False
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('bot_status', 'off') ON CONFLICT (key) DO UPDATE SET value = 'off'")
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('bot_off_message', $1) ON CONFLICT (key) DO UPDATE SET value = $1", BOT_OFF_MESSAGE)
+
+    await state.clear()
+    await message.answer(
+        f"🔴 <b>Bot is now OFF.</b>\n\nUsers will see:\n\n{BOT_OFF_MESSAGE}",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_admin_menu_keyboard()
+    )
+
 @dp.message(F.text == "📋 Tasks", StateFilter("*"))
 async def admin_btn_view_all_tasks_dashboard(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -3528,286 +3564,6 @@ async def process_chat_message_step(message: Message, state: FSMContext):
         await message.answer(f"✅ **Message successfully sent to User `{target_user_id}`!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
     except Exception as e:
         await message.answer(f"❌ Failed to send message to User `{target_user_id}`.\n\nError: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
-
-    await state.clear()
-
-# ============================================
-# CANCEL SELL & CANCEL TASK SUB-MENU SYSTEM
-# ============================================
-
-@dp.message(F.text == "🚫 Cancel Sell", StateFilter("*"))
-async def admin_btn_cancel_sell(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        return
-    await state.clear()
-    
-    async with db_pool.acquire() as conn:
-        count = await conn.fetchval("SELECT COUNT(*) FROM pending_sells WHERE status = 'pending_review'")
-        
-    if not count:
-        await message.answer("📭 <b>No pending Gmail sell requests found to cancel.</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
-        return
-
-    await message.answer(
-        f"🚫 <b>Cancel Sell Gmail Dashboard</b>\n\n"
-        f"Currently <b>{count}</b> pending Gmail sell request(s).\n"
-        f"Choose an option below:",
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_cancel_sell_options_keyboard()
-    )
-
-@dp.callback_query(F.data == "admin_cancel_sell_all")
-async def cb_admin_cancel_sell_all(call: CallbackQuery, state: FSMContext):
-    await call.answer()
-    if call.from_user.id != ADMIN_ID:
-        return
-    await state.set_state(AdminState.waiting_for_bulk_cancel_sell_reason)
-    await call.message.answer(
-        "🚫 <b>Cancel All Pending Sell Gmail</b>\n\n"
-        "Send the single rejection reason message to send to all affected users below:",
-        parse_mode=ParseMode.HTML
-    )
-
-@dp.callback_query(F.data == "admin_cancel_sell_by_id")
-async def cb_admin_cancel_sell_by_id(call: CallbackQuery, state: FSMContext):
-    await call.answer()
-    if call.from_user.id != ADMIN_ID:
-        return
-    await state.set_state(AdminState.waiting_for_cancel_sell_by_id_target)
-    await call.message.answer(
-        "🚫 <b>Cancel Sell Gmail By ID</b>\n\n"
-        "Send the target <b>Sell Request ID</b> (e.g., <code>100</code>).\n"
-        "<i>Note: Request #100 and all pending sell requests prior to #100 will be cancelled!</i>",
-        parse_mode=ParseMode.HTML
-    )
-
-@dp.message(AdminState.waiting_for_cancel_sell_by_id_target, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def process_cancel_sell_by_id_target_step(message: Message, state: FSMContext):
-    await cleanup_last_menu(message, state)
-    try:
-        target_id = int(message.text.strip())
-        await state.update_data(target_sell_id=target_id)
-        await state.set_state(AdminState.waiting_for_cancel_sell_by_id_reason)
-        await message.answer(
-            f"🚫 Target Sell ID set to <code>#{target_id}</code>.\n\n"
-            f"Now send the single rejection reason message to send to all affected users:",
-            parse_mode=ParseMode.HTML
-        )
-    except ValueError:
-        await message.answer("❌ Invalid Sell ID. Please enter a valid number.", reply_markup=get_admin_menu_keyboard())
-        await state.clear()
-
-@dp.message(AdminState.waiting_for_cancel_sell_by_id_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def process_cancel_sell_by_id_reason_step(message: Message, state: FSMContext):
-    await cleanup_last_menu(message, state)
-    data = await state.get_data()
-    target_id = data.get('target_sell_id')
-    reason = message.text.strip()
-
-    if not target_id:
-        await message.answer("❌ Error: Target Sell ID lost.", reply_markup=get_admin_menu_keyboard())
-        await state.clear()
-        return
-
-    async with db_pool.acquire() as conn:
-        affected_sells = await conn.fetch(
-            "SELECT id, user_id FROM pending_sells WHERE status = 'pending_review' AND id <= $1",
-            target_id
-        )
-
-        if not affected_sells:
-            await message.answer(f"📭 No pending sell requests found with ID <= <code>#{target_id}</code>.", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
-            await state.clear()
-            return
-
-        affected_ids = [r['id'] for r in affected_sells]
-        await conn.execute("UPDATE pending_sells SET status = 'declined' WHERE id = ANY($1::int[])", affected_ids)
-
-    count = len(affected_sells)
-    await message.answer(f"✅ <b>Successfully cancelled {count} pending Gmail sell request(s) up to #{target_id} and notified users!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
-
-    for r in affected_sells:
-        sell_id = r['id']
-        uid = r['user_id']
-        asyncio.create_task(send_user_notification(
-            uid,
-            f'⚠️ <b>Your sell request #{sell_id} was declined.</b>\n\n💬 <b>Reason:</b> {reason}',
-            parse_mode=ParseMode.HTML
-        ))
-
-    await state.clear()
-
-@dp.message(AdminState.waiting_for_bulk_cancel_sell_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def process_bulk_cancel_sell_reason_step(message: Message, state: FSMContext):
-    await cleanup_last_menu(message, state)
-    reason = message.text.strip()
-    
-    async with db_pool.acquire() as conn:
-        pending_sells = await conn.fetch("SELECT id, user_id FROM pending_sells WHERE status = 'pending_review'")
-        
-        if not pending_sells:
-            await message.answer("📭 No pending sell requests found.", reply_markup=get_admin_menu_keyboard())
-            await state.clear()
-            return
-
-        await conn.execute("UPDATE pending_sells SET status = 'declined' WHERE status = 'pending_review'")
-
-    count = len(pending_sells)
-    await message.answer(f"✅ <b>Successfully cancelled {count} pending Gmail sell requests and notified users!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
-
-    for r in pending_sells:
-        sell_id = r['id']
-        uid = r['user_id']
-        asyncio.create_task(send_user_notification(
-            uid,
-            f'⚠️ <b>Your sell request #{sell_id} was declined.</b>\n\n💬 <b>Reason:</b> {reason}',
-            parse_mode=ParseMode.HTML
-        ))
-
-    await state.clear()
-
-@dp.message(F.text == "🚫 Cancel Task", StateFilter("*"))
-async def admin_btn_cancel_task(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        return
-    await state.clear()
-
-    async with db_pool.acquire() as conn:
-        count = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status = 'pending_review'")
-
-    if not count:
-        await message.answer("📭 <b>No pending task submissions found to cancel.</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
-        return
-
-    await message.answer(
-        f"🚫 <b>Cancel Pending Tasks Dashboard</b>\n\n"
-        f"Currently <b>{count}</b> pending task submission(s).\n"
-        f"Choose an option below:",
-        parse_mode=ParseMode.HTML,
-        reply_markup=get_cancel_task_options_keyboard()
-    )
-
-@dp.callback_query(F.data == "admin_cancel_task_all")
-async def cb_admin_cancel_task_all(call: CallbackQuery, state: FSMContext):
-    await call.answer()
-    if call.from_user.id != ADMIN_ID:
-        return
-    await state.set_state(AdminState.waiting_for_bulk_cancel_task_reason)
-    await call.message.answer(
-        "🚫 <b>Cancel All Pending Tasks</b>\n\n"
-        "Send the single rejection reason message to send to all affected users below:",
-        parse_mode=ParseMode.HTML
-    )
-
-@dp.callback_query(F.data == "admin_cancel_task_by_id")
-async def cb_admin_cancel_task_by_id(call: CallbackQuery, state: FSMContext):
-    await call.answer()
-    if call.from_user.id != ADMIN_ID:
-        return
-    await state.set_state(AdminState.waiting_for_cancel_task_by_id_target)
-    await call.message.answer(
-        "🚫 <b>Cancel Task Submissions By ID</b>\n\n"
-        "Send the target <b>Task ID</b> (e.g., <code>100</code>).\n"
-        "<i>Note: Task #100 and all pending task submissions prior to #100 will be cancelled!</i>",
-        parse_mode=ParseMode.HTML
-    )
-
-@dp.message(AdminState.waiting_for_cancel_task_by_id_target, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def process_cancel_task_by_id_target_step(message: Message, state: FSMContext):
-    await cleanup_last_menu(message, state)
-    try:
-        target_id = int(message.text.strip())
-        await state.update_data(target_task_id=target_id)
-        await state.set_state(AdminState.waiting_for_cancel_task_by_id_reason)
-        await message.answer(
-            f"🚫 Target Task ID set to <code>#{target_id}</code>.\n\n"
-            f"Now send the single rejection reason message to send to all affected users:",
-            parse_mode=ParseMode.HTML
-        )
-    except ValueError:
-        await message.answer("❌ Invalid Task ID. Please enter a valid number.", reply_markup=get_admin_menu_keyboard())
-        await state.clear()
-
-@dp.message(AdminState.waiting_for_cancel_task_by_id_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def process_cancel_task_by_id_reason_step(message: Message, state: FSMContext):
-    await cleanup_last_menu(message, state)
-    data = await state.get_data()
-    target_id = data.get('target_task_id')
-    reason = message.text.strip()
-
-    if not target_id:
-        await message.answer("❌ Error: Target Task ID lost.", reply_markup=get_admin_menu_keyboard())
-        await state.clear()
-        return
-
-    async with db_pool.acquire() as conn:
-        affected_tasks = await conn.fetch('''
-            SELECT t.id as task_id, ta.user_id 
-            FROM tasks t
-            JOIN task_assignments ta ON t.id = ta.task_id
-            WHERE t.status = 'pending_review' AND t.id <= $1
-        ''', target_id)
-
-        if not affected_tasks:
-            await message.answer(f"📭 No pending task submissions found with ID <= <code>#{target_id}</code>.", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
-            await state.clear()
-            return
-
-        affected_task_ids = [r['task_id'] for r in affected_tasks]
-
-        async with conn.transaction():
-            await conn.execute("DELETE FROM task_assignments WHERE task_id = ANY($1::int[])", affected_task_ids)
-            await conn.execute("UPDATE tasks SET status = 'available' WHERE id = ANY($1::int[])", affected_task_ids)
-
-    count = len(affected_tasks)
-    await message.answer(f"✅ <b>Successfully cancelled {count} pending tasks up to #{target_id}, returned them to pool, and notified users!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
-
-    for r in affected_tasks:
-        tid = r['task_id']
-        uid = r['user_id']
-        asyncio.create_task(send_user_notification(
-            uid,
-            f'⚠️ <b>Your submission for Task #{tid} was declined.</b>\n\n💬 <b>Reason:</b> {reason}\n\n🛡 The task has been returned to the pool.',
-            parse_mode=ParseMode.HTML
-        ))
-
-    await state.clear()
-
-@dp.message(AdminState.waiting_for_bulk_cancel_task_reason, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
-async def process_bulk_cancel_task_reason_step(message: Message, state: FSMContext):
-    await cleanup_last_menu(message, state)
-    reason = message.text.strip()
-
-    async with db_pool.acquire() as conn:
-        pending_tasks = await conn.fetch('''
-            SELECT t.id as task_id, ta.user_id 
-            FROM tasks t
-            JOIN task_assignments ta ON t.id = ta.task_id
-            WHERE t.status = 'pending_review'
-        ''')
-
-        if not pending_tasks:
-            await message.answer("📭 No pending task submissions found.", reply_markup=get_admin_menu_keyboard())
-            await state.clear()
-            return
-
-        task_ids = [r['task_id'] for r in pending_tasks]
-
-        async with conn.transaction():
-            await conn.execute("DELETE FROM task_assignments WHERE task_id = ANY($1::int[])", task_ids)
-            await conn.execute("UPDATE tasks SET status = 'available' WHERE id = ANY($1::int[])", task_ids)
-
-    count = len(pending_tasks)
-    await message.answer(f"✅ <b>Successfully cancelled {count} pending tasks, returned them to pool, and notified users!</b>", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
-
-    for r in pending_tasks:
-        tid = r['task_id']
-        uid = r['user_id']
-        asyncio.create_task(send_user_notification(
-            uid,
-            f'⚠️ <b>Your submission for Task #{tid} was declined.</b>\n\n💬 <b>Reason:</b> {reason}\n\n🛡 The task has been returned to the pool.',
-            parse_mode=ParseMode.HTML
-        ))
 
     await state.clear()
 
@@ -5752,8 +5508,6 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
         await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
         return
 
-    await call.answer()
-
     total_deducted = bal
     payout_amount = bal - UPI_FEES
 
@@ -5766,17 +5520,35 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
             await call.answer("Your Previous Withdrawal is Already Pending, Please Wait it to be Processed", show_alert=True)
             return
 
-        async with conn.transaction():
-            await conn.execute("UPDATE users SET balance = 0 WHERE user_id=$1", user_id)
-            withdraw_id = await conn.fetchval(
-                "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, 'UPI', $3) RETURNING id",
-                user_id, payout_amount, upi
-            )
-            await conn.execute(
-                "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
-                user_id, "withdrawal_pending", -total_deducted, f"UPI Withdrawal #{withdraw_id} pending (Payout: ₹{payout_amount:.2f}, Fee: ₹{UPI_FEES:.2f})"
-            )
+        withdraw_id = None
+        try:
+            async with conn.transaction():
+                # Atomic decrement guarded by balance >= amount: never overwrites a balance that
+                # may have changed since it was first read, and never goes negative.
+                new_balance = await conn.fetchval(
+                    "UPDATE users SET balance = balance - $2 WHERE user_id=$1 AND balance >= $2 RETURNING balance",
+                    user_id, total_deducted
+                )
+                if new_balance is None:
+                    raise ValueError("balance_changed")
 
+                withdraw_id = await conn.fetchval(
+                    "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, 'UPI', $3) RETURNING id",
+                    user_id, payout_amount, upi
+                )
+                await conn.execute(
+                    "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
+                    user_id, "withdrawal_pending", -total_deducted, f"UPI Withdrawal #{withdraw_id} pending (Payout: ₹{payout_amount:.2f}, Fee: ₹{UPI_FEES:.2f})"
+                )
+        except asyncpg.exceptions.UniqueViolationError:
+            # The database-level guard caught a double-submit race that slipped past the check above.
+            await call.answer("Your Previous Withdrawal is Already Pending, Please Wait it to be Processed", show_alert=True)
+            return
+        except ValueError:
+            await call.answer("⚠️ Your balance changed just now. Please try again.", show_alert=True)
+            return
+
+    await call.answer()
     invalidate_user_cache(user_id)
 
     kb = InlineKeyboardBuilder()
@@ -5835,8 +5607,6 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
         await call.answer(f"❌ Minimum withdrawal is {min_withdraw_str}. Current Balance: {bal_str}", show_alert=True)
         return
 
-    await call.answer()
-
     total_deducted = bal
     payout_amount = bal - USDT_FEES
 
@@ -5849,17 +5619,32 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
             await call.answer("Your Previous Withdrawal is Already Pending, Please Wait it to be Processed", show_alert=True)
             return
 
-        async with conn.transaction():
-            await conn.execute("UPDATE users SET balance = 0 WHERE user_id=$1", user_id)
-            withdraw_id = await conn.fetchval(
-                "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, 'USDT BEP-20', $3) RETURNING id",
-                user_id, payout_amount, usdt
-            )
-            await conn.execute(
-                "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
-                user_id, "withdrawal_pending", -total_deducted, f"USDT Withdrawal #{withdraw_id} pending (Payout: ₹{payout_amount:.2f}, Fee: ₹{USDT_FEES:.2f})"
-            )
+        withdraw_id = None
+        try:
+            async with conn.transaction():
+                new_balance = await conn.fetchval(
+                    "UPDATE users SET balance = balance - $2 WHERE user_id=$1 AND balance >= $2 RETURNING balance",
+                    user_id, total_deducted
+                )
+                if new_balance is None:
+                    raise ValueError("balance_changed")
 
+                withdraw_id = await conn.fetchval(
+                    "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, 'USDT BEP-20', $3) RETURNING id",
+                    user_id, payout_amount, usdt
+                )
+                await conn.execute(
+                    "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
+                    user_id, "withdrawal_pending", -total_deducted, f"USDT Withdrawal #{withdraw_id} pending (Payout: ₹{payout_amount:.2f}, Fee: ₹{USDT_FEES:.2f})"
+                )
+        except asyncpg.exceptions.UniqueViolationError:
+            await call.answer("Your Previous Withdrawal is Already Pending, Please Wait it to be Processed", show_alert=True)
+            return
+        except ValueError:
+            await call.answer("⚠️ Your balance changed just now. Please try again.", show_alert=True)
+            return
+
+    await call.answer()
     invalidate_user_cache(user_id)
 
     kb = InlineKeyboardBuilder()
@@ -5925,6 +5710,19 @@ async def inline_withdraw_ultra_handler(call: CallbackQuery):
 
     payout_amount = bal - ULTRA_FEES
 
+    # Reserve (atomically deduct) the balance BEFORE calling the external payment API.
+    # This closes the double-submit race: a second rapid tap will find insufficient
+    # balance here and stop, instead of both taps calling the real payment API.
+    async with db_pool.acquire() as conn:
+        new_balance = await conn.fetchval(
+            "UPDATE users SET balance = balance - $2 WHERE user_id=$1 AND balance >= $2 RETURNING balance",
+            user_id, bal
+        )
+    if new_balance is None:
+        await call.answer("⚠️ Your balance changed just now. Please try again.", show_alert=True)
+        return
+    invalidate_user_cache(user_id)
+
     url = f"https://ultra-pay.store/APIs/api?token={urllib.parse.quote(ULTRA_TOKEN)}&key={urllib.parse.quote(ULTRA_KEY)}&paytoNumber={urllib.parse.quote(ultra_num)}&amount={payout_amount:.2f}&comment=iGmail Pay"
 
     await call.answer("⚡ Processing instant payment via Ultra Gateway...", show_alert=False)
@@ -5960,11 +5758,8 @@ async def inline_withdraw_ultra_handler(call: CallbackQuery):
     if api_success:
         async with db_pool.acquire() as conn:
             async with conn.transaction():
-                await conn.execute("UPDATE users SET balance = 0 WHERE user_id=$1", user_id)
                 await conn.execute("INSERT INTO withdrawals(user_id, amount, method, payment_address, status) VALUES ($1, $2, 'Ultra Gateway', $3, 'paid')", user_id, payout_amount, ultra_num)
                 await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "withdrawal", -bal, "Ultra Gateway instant payout paid")
-
-        invalidate_user_cache(user_id)
 
         bal_display = format_currency(payout_amount, curr)
         msg_text = (
@@ -5980,6 +5775,11 @@ async def inline_withdraw_ultra_handler(call: CallbackQuery):
             if "message is not modified" not in str(e):
                 await call.message.answer(msg_text, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
     else:
+        # Payment failed - refund the balance that was reserved before the API call.
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", bal, user_id)
+        invalidate_user_cache(user_id)
+
         fail_msg = (
             f"❌ <b>Ultra Gateway Instant Payment Failed!</b>\n\n"
             f"💬 <b>Reason:</b> <code>{api_reason}</code>\n\n"
@@ -6158,21 +5958,26 @@ async def approve_sell_unified(call: CallbackQuery):
     sell_id = int(call.data.split(":")[1])
 
     async with db_pool.acquire() as conn:
-        sell_data = await conn.fetchrow("SELECT user_id, amount, status FROM pending_sells WHERE id=$1", sell_id)
-        if not sell_data or sell_data['status'] != 'pending_review':
-            await call.answer("⚠️ This request is already processed!", show_alert=True)
-            return
-
-        await call.answer()
-        user_id = sell_data['user_id']
-        amount = sell_data['amount']
-
-        await ensure_user(user_id, conn=conn)
-
         async with conn.transaction():
+            # Atomically claim the row: the UPDATE only affects a row still in pending_review,
+            # so a duplicate/resent callback that arrives a moment later finds 0 rows and bails out
+            # instead of crediting the balance twice.
+            sell_data = await conn.fetchrow(
+                "UPDATE pending_sells SET status='approved' WHERE id=$1 AND status='pending_review' RETURNING user_id, amount",
+                sell_id
+            )
+            if not sell_data:
+                await call.answer("⚠️ This request is already processed!", show_alert=True)
+                return
+
+            await call.answer()
+            user_id = sell_data['user_id']
+            amount = sell_data['amount']
+
+            await ensure_user(user_id, conn=conn)
+
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", amount, user_id)
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "sell", amount, f"Gmail sell #{sell_id} approved")
-            await conn.execute("UPDATE pending_sells SET status='approved' WHERE id=$1", sell_id)
 
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
 
@@ -6267,30 +6072,38 @@ async def approve_task(call: CallbackQuery):
     task_id = int(call.data.split(":")[1])
     
     async with db_pool.acquire() as conn:
-        task_data = await conn.fetchrow("SELECT reward, status, details FROM tasks WHERE id=$1", task_id)
-        if not task_data or task_data['status'] != 'pending_review':
-            await call.answer("⚠️ This request is already processed!", show_alert=True)
-            return
-
-        await call.answer()
-        reward = task_data['reward']
-        assigned_user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
-        if not assigned_user_id:
-            return
-
-        user_id = assigned_user_id
-        try:
-            task_email = task_data['details'].split(" | ")[0].replace("Email: ", "").strip()
-        except Exception:
-            task_email = "Task Account"
-
-        await ensure_user(user_id, conn=conn)
-
         async with conn.transaction():
+            # Atomically claim the row (only affects a row still in pending_review), closing the
+            # race where a resent/duplicate callback could otherwise credit the reward twice.
+            task_data = await conn.fetchrow(
+                "UPDATE tasks SET status='completed' WHERE id=$1 AND status='pending_review' RETURNING reward, details",
+                task_id
+            )
+            if not task_data:
+                await call.answer("⚠️ This request is already processed!", show_alert=True)
+                return
+
+            reward = task_data['reward']
+            assigned_user_id = await conn.fetchval("SELECT user_id FROM task_assignments WHERE task_id=$1", task_id)
+            if not assigned_user_id:
+                # Data inconsistency: no assignment row for this task. Revert the status change
+                # instead of silently leaving it stuck, and surface this to the admin so it can be checked.
+                await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
+                await call.answer("⚠️ Error: No assigned user found for this task. It has been left in Pending Review — please check it manually.", show_alert=True)
+                return
+
+            await call.answer()
+            user_id = assigned_user_id
+            try:
+                task_email = task_data['details'].split(" | ")[0].replace("Email: ", "").strip()
+            except Exception:
+                task_email = "Task Account"
+
+            await ensure_user(user_id, conn=conn)
+
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", reward, user_id)
             await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "task", reward, f"{task_email} #{task_id}")
             await conn.execute("DELETE FROM task_assignments WHERE task_id=$1", task_id)
-            await conn.execute("UPDATE tasks SET status='completed' WHERE id=$1", task_id)
 
             referred_by = await conn.fetchval("SELECT referred_by FROM users WHERE user_id=$1", user_id)
 
@@ -6392,17 +6205,19 @@ async def pay_withdraw(call: CallbackQuery):
     withdrawal_id = int(call.data.split(":")[1])
 
     async with db_pool.acquire() as conn:
-        w_data = await conn.fetchrow("SELECT user_id, amount, status FROM withdrawals WHERE id=$1", withdrawal_id)
-        if not w_data or w_data['status'] != 'pending':
-            await call.answer("⚠️ This request is already processed!", show_alert=True)
-            return
-
-        await call.answer()
-        user_id = w_data['user_id']
-        payout_amount = w_data['amount']
-
         async with conn.transaction():
-            await conn.execute("UPDATE withdrawals SET status='paid' WHERE id=$1", withdrawal_id)
+            w_data = await conn.fetchrow(
+                "UPDATE withdrawals SET status='paid' WHERE id=$1 AND status='pending' RETURNING user_id, amount",
+                withdrawal_id
+            )
+            if not w_data:
+                await call.answer("⚠️ This request is already processed!", show_alert=True)
+                return
+
+            await call.answer()
+            user_id = w_data['user_id']
+            payout_amount = w_data['amount']
+
             await conn.execute(
                 "UPDATE transactions SET type='withdrawal', note=$1 WHERE user_id=$2 AND note LIKE $3",
                 "Withdrawal paid", user_id, f"%Withdrawal #{withdrawal_id}%"
@@ -6423,28 +6238,35 @@ async def reject_withdraw(call: CallbackQuery):
     withdrawal_id = int(call.data.split(":")[1])
     
     async with db_pool.acquire() as conn:
-        w_data = await conn.fetchrow("SELECT user_id, amount, method, status FROM withdrawals WHERE id=$1", withdrawal_id)
-        if not w_data or w_data['status'] != 'pending':
-            await call.answer("⚠️ This request is already processed!", show_alert=True)
-            return
-
-        await call.answer()
-        user_id = w_data['user_id']
-        payout_amount = w_data['amount']
-        method = (w_data['method'] or 'UPI').lower()
-
-        fee = UPI_FEES if 'upi' in method else (USDT_FEES if 'usdt' in method else ULTRA_FEES)
-        refund_total = payout_amount + fee
-
         async with conn.transaction():
-            await conn.execute("UPDATE withdrawals SET status='rejected' WHERE id=$1", withdrawal_id)
+            w_data = await conn.fetchrow(
+                "UPDATE withdrawals SET status='rejected' WHERE id=$1 AND status='pending' RETURNING user_id, amount, method",
+                withdrawal_id
+            )
+            if not w_data:
+                await call.answer("⚠️ This request is already processed!", show_alert=True)
+                return
+
+            await call.answer()
+            user_id = w_data['user_id']
+            payout_amount = w_data['amount']
+            method = (w_data['method'] or 'UPI').lower()
+
+            fee = UPI_FEES if 'upi' in method else (USDT_FEES if 'usdt' in method else ULTRA_FEES)
+            refund_total = payout_amount + fee
+
             await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", refund_total, user_id)
-            await conn.execute("DELETE FROM transactions WHERE user_id=$1 AND note LIKE $2", user_id, f"%Withdrawal #{withdrawal_id}%")
+            # Keep the original ledger entry (relabelled) instead of deleting it, so the
+            # transaction history still shows the withdrawal that triggered this refund.
+            await conn.execute(
+                "UPDATE transactions SET type='withdrawal_rejected', note = note || ' [REJECTED]' WHERE user_id=$1 AND note LIKE $2",
+                user_id, f"%Withdrawal #{withdrawal_id}%"
+            )
             await conn.execute(
                 "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
                 user_id, "refund", refund_total, f"Refund for rejected withdrawal #{withdrawal_id}"
             )
-            
+
     invalidate_user_cache(user_id)
     await edit_admin_message(call, '⚠️ Withdrawal Rejected (Balance Refunded)')
     
@@ -6470,7 +6292,7 @@ async def auto_expire_tasks():
             expired_30m = []
             async with db_pool.acquire() as conn:
                 rows_30m = await conn.fetch('''
-                    SELECT ta.task_id, ta.user_id, ta.assigned_at 
+                    SELECT ta.task_id, ta.user_id, ta.assigned_at, ta.message_id 
                     FROM task_assignments ta
                     JOIN tasks t ON ta.task_id = t.id
                     WHERE t.status = 'assigned'
@@ -6479,7 +6301,7 @@ async def auto_expire_tasks():
                 now = datetime.utcnow()
                 for r in rows_30m:
                     if now - r['assigned_at'] > timedelta(minutes=30):
-                        expired_30m.append((r['task_id'], r['user_id']))
+                        expired_30m.append((r['task_id'], r['user_id'], r['message_id']))
 
                 if expired_30m:
                     task_ids_30m = [t[0] for t in expired_30m]
@@ -6487,7 +6309,12 @@ async def auto_expire_tasks():
                         await conn.execute('DELETE FROM task_assignments WHERE task_id = ANY($1::int[])', task_ids_30m)
                         await conn.execute("UPDATE tasks SET status='available' WHERE id = ANY($1::int[])", task_ids_30m)
 
-            for task_id, user_id in expired_30m:
+            for task_id, user_id, msg_id in expired_30m:
+                if msg_id:
+                    try:
+                        await bot.delete_message(chat_id=user_id, message_id=msg_id)
+                    except Exception:
+                        pass
                 asyncio.create_task(send_user_notification(
                     user_id, 
                     f'🚀 Task #{task_id} time limit expired (30 mins).\nThe task was returned to the pool.', 
@@ -6498,10 +6325,10 @@ async def auto_expire_tasks():
             expired_lifetime_tasks = []
             async with db_pool.acquire() as conn:
                 rows_lifetime = await conn.fetch('''
-                    SELECT t.id, t.title, t.details, t.created_at, ta.user_id 
+                    SELECT t.id, t.title, t.details, t.created_at, ta.user_id, ta.message_id 
                     FROM tasks t
                     LEFT JOIN task_assignments ta ON t.id = ta.task_id
-                    WHERE t.status != 'completed'
+                    WHERE t.status NOT IN ('completed', 'pending_review')
                 ''')
 
                 now = datetime.utcnow()
@@ -6511,7 +6338,8 @@ async def auto_expire_tasks():
                         expired_lifetime_tasks.append({
                             'id': r['id'],
                             'details': r['details'],
-                            'user_id': r['user_id']
+                            'user_id': r['user_id'],
+                            'message_id': r['message_id']
                         })
 
                 if expired_lifetime_tasks:
@@ -6535,6 +6363,13 @@ async def auto_expire_tasks():
                     pass
 
                 if assigned_u:
+                    msg_id = item.get('message_id')
+                    if msg_id:
+                        try:
+                            await bot.delete_message(chat_id=assigned_u, message_id=msg_id)
+                        except Exception:
+                            pass
+
                     user_notice = f"⏰ <b>Task Expired:</b>\nYour assigned task #{task_id} (<code>{email_str}</code>) has expired after 23 hours 30 minutes due to lifetime limit reached."
                     asyncio.create_task(send_user_notification(
                         assigned_u, 
