@@ -81,6 +81,11 @@ ULTRA_FEES = 0.0
 ULTRA_TOKEN = "niJeDFHRIN9ONCwxGparqUp0degHIpjHu0w3pprXok"
 ULTRA_KEY = "DL6mlu7DBRSR8odXWGG5"
 
+# TUTORIAL VIDEO LINKS (set by admin via 🤷‍♂️Videos panel; None = no button shown)
+TASK_VIDEO_LINK = None
+SELL_VIDEO_LINK = None
+HOWTO_VIDEO_LINK = None
+
 # VALIDATOR CONFIGURATION
 EMAILABLE_API_KEY = "netnit_EFo0B5lNYvUsZJ5eHMxX4SBNvT12Uq71"
 VALIDATOR_ENABLED = True     # True = Active, False = Deactivated
@@ -97,7 +102,7 @@ MENU_BUTTONS = {
     "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
     "📢 Broadcast", "⚙️ Change Values", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
     "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "⚙️ Validator", "👑 Transfer Admin",
-    "🟢 Ultra Status: ON", "🔴 Ultra Status: OFF", "👷 Manage Workers"
+    "🟢 Ultra Status: ON", "🔴 Ultra Status: OFF", "👷 Manage Workers", "🤖Dustbin", "🤷‍♂️Videos"
 }
 
 # ============================================
@@ -291,6 +296,11 @@ class AdminState(StatesGroup):
     waiting_for_cancel_sell_by_id_reason = State()
     waiting_for_cancel_task_by_id_target = State()
     waiting_for_cancel_task_by_id_reason = State()
+    waiting_for_giveaway_message = State()
+    waiting_for_giveaway_emoji = State()
+    waiting_for_giveaway_target = State()
+    waiting_for_dustbin_replace = State()
+    waiting_for_video_link = State()
 
 # ============================================
 # DATABASE INITIALIZATION & CACHE
@@ -434,9 +444,39 @@ async def init_db():
         await conn.execute("ALTER TABLE worker_permissions ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE")
         await conn.execute("ALTER TABLE worker_permissions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
 
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS giveaways (
+                id SERIAL PRIMARY KEY,
+                emoji_type TEXT DEFAULT 'dice',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS giveaway_plays (
+                id SERIAL PRIMARY KEY,
+                giveaway_id INT,
+                user_id BIGINT,
+                value INT,
+                reward DOUBLE PRECISION,
+                played_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(giveaway_id, user_id)
+            )
+        ''')
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS dustbin_tasks (
+                id SERIAL PRIMARY KEY,
+                title TEXT,
+                details TEXT,
+                reward DOUBLE PRECISION,
+                added_by BIGINT DEFAULT NULL,
+                removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
 async def load_settings_and_cache():
     global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
     global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS, DEFAULT_TASK_PASS_STATUS, UPI_FEES, USDT_FEES, ULTRA_FEES, ULTRA_TOKEN, ULTRA_KEY
+    global TASK_VIDEO_LINK, SELL_VIDEO_LINK, HOWTO_VIDEO_LINK
     
     async with db_pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id FROM banned_users")
@@ -513,6 +553,15 @@ async def load_settings_and_cache():
         u_key = await conn.fetchval("SELECT value FROM bot_settings WHERE key='ultra_key'")
         if u_key:
             ULTRA_KEY = u_key
+
+        tv_link = await conn.fetchval("SELECT value FROM bot_settings WHERE key='video_task_link'")
+        TASK_VIDEO_LINK = tv_link if tv_link else None
+
+        sv_link = await conn.fetchval("SELECT value FROM bot_settings WHERE key='video_sell_link'")
+        SELL_VIDEO_LINK = sv_link if sv_link else None
+
+        hv_link = await conn.fetchval("SELECT value FROM bot_settings WHERE key='video_howto_link'")
+        HOWTO_VIDEO_LINK = hv_link if hv_link else None
 
     try:
         me = await bot.get_me()
@@ -693,7 +742,15 @@ def get_main_menu_keyboard():
         callback_data="menu_support",
         style="danger"
     )
-    kb.adjust(2, 2, 2, 1, 1)
+    if HOWTO_VIDEO_LINK:
+        kb.button(
+            text="🎬 How To Use Bot",
+            url=HOWTO_VIDEO_LINK,
+            style="primary"
+        )
+        kb.adjust(2, 2, 2, 1, 2)
+    else:
+        kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 def get_add_task_type_keyboard():
@@ -789,12 +846,15 @@ def get_admin_menu_keyboard():
     ultra_btn_text = "🟢 Ultra Status: ON" if ULTRA_STATUS else "🔴 Ultra Status: OFF"
     kb.button(text=ultra_btn_text, style="success" if ULTRA_STATUS else "danger")
 
+    kb.button(text="🤖Dustbin", style="danger")
+    kb.button(text="🤷‍♂️Videos", style="primary")
+
     kb.button(text="👷 Manage Workers", style="primary")
     kb.button(text="👑 Transfer Admin", style="danger")
 
     kb.button(text="🏠 Main Menu", style="primary")
     
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_cancel_sell_options_keyboard():
@@ -904,7 +964,7 @@ def get_change_values_inline_keyboard():
         style="success" if SELL_GMAIL_STATUS else "danger"
     )
 
-    kb.adjust(1, 1, 1, 1, 1, 1, 1, 1, 1)
+    kb.adjust(2, 2, 2, 2, 1)
     return kb.as_markup()
 
 def get_validator_admin_inline_keyboard():
@@ -998,7 +1058,7 @@ def get_back_inline_keyboard():
     return kb.as_markup()
 
 def get_task_action_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[[
+    rows = [[
         InlineKeyboardButton(
             text="✔️ Submit", 
             callback_data="user_submit_task", 
@@ -1009,7 +1069,10 @@ def get_task_action_keyboard():
             callback_data="user_cancel_task", 
             style="danger"
         )
-    ]])
+    ]]
+    if TASK_VIDEO_LINK:
+        rows.append([InlineKeyboardButton(text="🎬 Tutorial Video", url=TASK_VIDEO_LINK)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def get_support_cancel_keyboard():
     kb = InlineKeyboardBuilder()
@@ -1936,11 +1999,17 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
         f'🏷️ <b>Sell Price {rate_str}/Gmail</b>\n\n'
         '🤑 <b>Step 1/2:</b> Please send the Gmail <b>Username</b> (e.g., <code>example@gmail.com</code>):'
     )
+    sell_kb = InlineKeyboardBuilder()
+    if SELL_VIDEO_LINK:
+        sell_kb.button(text="🎬 Tutorial Video", url=SELL_VIDEO_LINK)
+    sell_kb.button(text="⬅️ Back", callback_data="menu_back")
+    sell_kb.adjust(1)
+    sell_markup = sell_kb.as_markup()
     try:
-        await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+        await call.message.edit_text(txt, parse_mode=ParseMode.HTML, reply_markup=sell_markup)
     except TelegramBadRequest as e:
         if "message is not modified" not in str(e):
-            await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+            await call.message.answer(txt, parse_mode=ParseMode.HTML, reply_markup=sell_markup)
     await state.update_data(last_menu_msg_id=call.message.message_id)
 
 @dp.message(UserState.selling_username, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
@@ -3788,6 +3857,376 @@ async def process_unassign_user_id_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
+# ============================================
+# DUSTBIN SYSTEM
+# ============================================
+
+def get_dustbin_menu_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🧹 Clear Dust", callback_data="dustbin_clear", style="danger")
+    kb.button(text="🗑 See Dustbin", callback_data="dustbin_view:1", style="primary")
+    kb.adjust(2)
+    return kb.as_markup()
+
+@dp.message(F.text == "🤖Dustbin", StateFilter("*"))
+async def admin_btn_dustbin(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    await message.answer(
+        "🤖 <b>Dustbin</b>\n\n"
+        "• <b>Clear Dust:</b> Unassigns all active tasks (notifying affected users) and moves all "
+        "available/assigned tasks (not Pending Review) into the Dustbin, removing them from the task pool.\n"
+        "• <b>See Dustbin:</b> Browse dustbinned tasks and Restore, Delete, or Replace their Gmail username.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_dustbin_menu_keyboard()
+    )
+
+@dp.callback_query(F.data == "dustbin_clear")
+async def cb_dustbin_clear(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+    await state.clear()
+
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT id, title, details, reward, added_by, status FROM tasks WHERE status != 'pending_review'")
+
+        if not rows:
+            try:
+                await call.message.edit_text("📭 <b>No tasks found to move to the Dustbin.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+            except TelegramBadRequest as e:
+                if "message is not modified" not in str(e):
+                    await call.message.answer("📭 <b>No tasks found to move to the Dustbin.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+            return
+
+        task_ids = [r['id'] for r in rows]
+
+        assigned_rows = await conn.fetch('''
+            SELECT ta.task_id, ta.user_id, ta.message_id
+            FROM task_assignments ta
+            WHERE ta.task_id = ANY($1::int[])
+        ''', task_ids)
+
+        async with conn.transaction():
+            for r in rows:
+                await conn.execute(
+                    "INSERT INTO dustbin_tasks (title, details, reward, added_by) VALUES ($1, $2, $3, $4)",
+                    r['title'], r['details'], r['reward'], r['added_by']
+                )
+            await conn.execute("DELETE FROM task_assignments WHERE task_id = ANY($1::int[])", task_ids)
+            await conn.execute("DELETE FROM tasks WHERE id = ANY($1::int[])", task_ids)
+
+    total_count = len(task_ids)
+    unassigned_count = len(assigned_rows)
+
+    try:
+        await call.message.edit_text(
+            f"✅ <b>Dustbin Cleared!</b>\n\n"
+            f"🗑 <b>Total tasks moved to Dustbin:</b> {total_count}\n"
+            f"👤 <b>Active users unassigned & notified:</b> {unassigned_count}",
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_back_inline_keyboard()
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(
+                f"✅ <b>Dustbin Cleared!</b>\n\n"
+                f"🗑 <b>Total tasks moved to Dustbin:</b> {total_count}\n"
+                f"👤 <b>Active users unassigned & notified:</b> {unassigned_count}",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_back_inline_keyboard()
+            )
+
+    for r in assigned_rows:
+        uid = r['user_id']
+        mid = r['message_id']
+        if mid:
+            try:
+                await bot.delete_message(chat_id=uid, message_id=mid)
+            except Exception:
+                pass
+        asyncio.create_task(send_user_notification(
+            uid,
+            '⚠️ <b>Your active task has been unassigned by the admin and returned to the pool.</b>\n\nChoose an option from the menu below:',
+            reply_markup=get_main_menu_keyboard(),
+            parse_mode=ParseMode.HTML
+        ))
+
+def format_dustbin_item_text(row, index: int, total: int) -> str:
+    try:
+        parts = row['details'].split(" | ")
+        username = parts[0].replace("Email: ", "").strip()
+        password = parts[1].replace("Pass: ", "").strip()
+    except Exception:
+        username = row['title'].replace("Login to ", "").strip()
+        password = "See Admin"
+
+    removed_str = row['removed_at'].strftime("%b %d, %Y %I:%M %p") if row['removed_at'] else "Unknown"
+
+    return (
+        f"🗑 <b>Dustbin Item {index}/{total}</b>\n\n"
+        f"📧 <b>Email:</b> <code>{username}</code>\n"
+        f"🔑 <b>Password:</b> <code>{password}</code>\n"
+        f"💰 <b>Reward:</b> ₹{row['reward']:.2f}\n"
+        f"🗓 <b>Removed At:</b> {removed_str}"
+    )
+
+def get_dustbin_item_keyboard(dustbin_id: int, page: int, total: int):
+    kb = InlineKeyboardBuilder()
+    nav_row = []
+    if page > 1:
+        nav_row.append(InlineKeyboardButton(text="<- Prev", callback_data=f"dustbin_view:{page - 1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page}/{total}", callback_data="noop"))
+    if page < total:
+        nav_row.append(InlineKeyboardButton(text="Next ->", callback_data=f"dustbin_view:{page + 1}"))
+    kb.row(*nav_row)
+    kb.row(
+        InlineKeyboardButton(text="♻️ Restore", callback_data=f"dustbin_restore:{dustbin_id}", style="success"),
+        InlineKeyboardButton(text="🗑 Delete", callback_data=f"dustbin_delete:{dustbin_id}", style="danger"),
+        InlineKeyboardButton(text="✏️ Replace", callback_data=f"dustbin_replace:{dustbin_id}", style="primary")
+    )
+    kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back"))
+    return kb.as_markup()
+
+@dp.callback_query(F.data.startswith("dustbin_view:"))
+async def cb_dustbin_view(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+    await state.clear()
+
+    page = int(call.data.split(":", 1)[1])
+
+    async with db_pool.acquire() as conn:
+        total = await conn.fetchval("SELECT COUNT(*) FROM dustbin_tasks")
+        if total == 0:
+            try:
+                await call.message.edit_text("📭 <b>Dustbin is empty.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+            except TelegramBadRequest as e:
+                if "message is not modified" not in str(e):
+                    await call.message.answer("📭 <b>Dustbin is empty.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+            return
+
+        page = max(1, min(page, total))
+        row = await conn.fetchrow(
+            "SELECT id, title, details, reward, added_by, removed_at FROM dustbin_tasks ORDER BY id ASC OFFSET $1 LIMIT 1",
+            page - 1
+        )
+
+    text = format_dustbin_item_text(row, page, total)
+    kb = get_dustbin_item_keyboard(row['id'], page, total)
+
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("dustbin_restore:"))
+async def cb_dustbin_restore(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    dustbin_id = int(call.data.split(":", 1)[1])
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT title, details, reward, added_by FROM dustbin_tasks WHERE id=$1", dustbin_id)
+        if not row:
+            await call.answer("⚠️ This item is no longer in the Dustbin.", show_alert=True)
+            return
+
+        async with conn.transaction():
+            await conn.execute(
+                "INSERT INTO tasks (title, details, reward, status, added_by) VALUES ($1, $2, $3, 'available', $4)",
+                row['title'], row['details'], row['reward'], row['added_by']
+            )
+            await conn.execute("DELETE FROM dustbin_tasks WHERE id=$1", dustbin_id)
+
+    await call.answer("♻️ Task restored to the pool!", show_alert=True)
+    try:
+        await call.message.edit_text("♻️ <b>Task has been restored to the available pool.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+    except Exception:
+        pass
+
+@dp.callback_query(F.data.startswith("dustbin_delete:"))
+async def cb_dustbin_delete(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    dustbin_id = int(call.data.split(":", 1)[1])
+
+    async with db_pool.acquire() as conn:
+        deleted = await conn.fetchval("DELETE FROM dustbin_tasks WHERE id=$1 RETURNING id", dustbin_id)
+
+    if not deleted:
+        await call.answer("⚠️ This item is no longer in the Dustbin.", show_alert=True)
+        return
+
+    await call.answer("🗑 Task permanently deleted!", show_alert=True)
+    try:
+        await call.message.edit_text("🗑 <b>Task has been permanently deleted from the Dustbin.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+    except Exception:
+        pass
+
+@dp.callback_query(F.data.startswith("dustbin_replace:"))
+async def cb_dustbin_replace(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    dustbin_id = int(call.data.split(":", 1)[1])
+
+    async with db_pool.acquire() as conn:
+        exists = await conn.fetchval("SELECT id FROM dustbin_tasks WHERE id=$1", dustbin_id)
+    if not exists:
+        await call.answer("⚠️ This item is no longer in the Dustbin.", show_alert=True)
+        return
+
+    await call.answer()
+    await state.set_state(AdminState.waiting_for_dustbin_replace)
+    await state.update_data(dustbin_replace_id=dustbin_id)
+    sent = await call.message.answer(
+        "✏️ Send the new Gmail <b>Username</b> to replace it for this Dustbin task (e.g. <code>example@gmail.com</code>):",
+        parse_mode=ParseMode.HTML
+    )
+    await state.update_data(last_menu_msg_id=sent.message_id)
+
+@dp.message(AdminState.waiting_for_dustbin_replace, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_dustbin_replace(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    data = await state.get_data()
+    dustbin_id = data.get("dustbin_replace_id")
+    await state.clear()
+
+    username_input = message.text.strip()
+    if "@gmail.com" not in username_input.lower() and "@" not in username_input:
+        username = f"{username_input}@gmail.com"
+    else:
+        username = username_input
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT details FROM dustbin_tasks WHERE id=$1", dustbin_id)
+        if not row:
+            await message.answer("⚠️ This item is no longer in the Dustbin.", reply_markup=get_admin_menu_keyboard())
+            return
+
+        if DEFAULT_TASK_PASS_STATUS:
+            password = DEFAULT_TASK_PASS
+        else:
+            password = generate_random_password(12)
+
+        new_details = f"Email: {username} | Pass: {password}"
+        new_title = f"Login to {username}"
+
+        await conn.execute(
+            "UPDATE dustbin_tasks SET title=$1, details=$2 WHERE id=$3",
+            new_title, new_details, dustbin_id
+        )
+
+    await message.answer(
+        f"✅ <b>Dustbin task's Gmail username replaced!</b>\n\n📧 <code>{username}</code>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_admin_menu_keyboard()
+    )
+
+# ============================================
+# TUTORIAL VIDEOS SYSTEM
+# ============================================
+
+def get_videos_menu_keyboard():
+    kb = InlineKeyboardBuilder()
+    task_status = "🟢 Set" if TASK_VIDEO_LINK else "🔴 Not Set"
+    sell_status = "🟢 Set" if SELL_VIDEO_LINK else "🔴 Not Set"
+    howto_status = "🟢 Set" if HOWTO_VIDEO_LINK else "🔴 Not Set"
+    kb.button(text=f"✍️ Tasks Video: {task_status}", callback_data="video_set:tasks", style="primary")
+    kb.button(text=f"📨 Sell Video: {sell_status}", callback_data="video_set:sell", style="primary")
+    kb.button(text=f"📘 How To Use Bot Video: {howto_status}", callback_data="video_set:howto", style="primary")
+    kb.adjust(1, 1, 1)
+    return kb.as_markup()
+
+@dp.message(F.text == "🤷‍♂️Videos", StateFilter("*"))
+async def admin_btn_videos(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    await message.answer(
+        "🤷‍♂️ <b>Tutorial Video Links</b>\n\n"
+        "Set a video link (YouTube, Telegram post, etc.) for each section below. "
+        "The related button only appears to users once a link is set.\n\n"
+        "Tap a section to set or update its link.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_videos_menu_keyboard()
+    )
+
+@dp.callback_query(F.data.startswith("video_set:"))
+async def cb_video_set(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+
+    video_key = call.data.split(":", 1)[1]
+    labels = {"tasks": "Tasks", "sell": "Sell Gmail", "howto": "How To Use Bot"}
+    label = labels.get(video_key, video_key)
+
+    await state.set_state(AdminState.waiting_for_video_link)
+    await state.update_data(video_key=video_key)
+    sent = await call.message.answer(
+        f"🎬 Send the new video link for <b>{label}</b>.\n\n"
+        f"Send <code>remove</code> to clear the current link and hide the button.",
+        parse_mode=ParseMode.HTML
+    )
+    await state.update_data(last_menu_msg_id=sent.message_id)
+
+@dp.message(AdminState.waiting_for_video_link, F.text, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_video_link(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    global TASK_VIDEO_LINK, SELL_VIDEO_LINK, HOWTO_VIDEO_LINK
+
+    data = await state.get_data()
+    video_key = data.get("video_key")
+    await state.clear()
+
+    text_input = message.text.strip()
+    clearing = text_input.lower() in ("remove", "off", "-", "clear", "none")
+    new_value = None if clearing else text_input
+
+    key_map = {
+        "tasks": "video_task_link",
+        "sell": "video_sell_link",
+        "howto": "video_howto_link"
+    }
+    labels = {"tasks": "Tasks", "sell": "Sell Gmail", "howto": "How To Use Bot"}
+    setting_key = key_map.get(video_key)
+    label = labels.get(video_key, video_key)
+
+    if not setting_key:
+        await message.answer("⚠️ Invalid video section. Please try again from the Videos menu.", reply_markup=get_admin_menu_keyboard())
+        return
+
+    async with db_pool.acquire() as conn:
+        if clearing:
+            await conn.execute("DELETE FROM bot_settings WHERE key=$1", setting_key)
+        else:
+            await conn.execute(
+                "INSERT INTO bot_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2",
+                setting_key, new_value
+            )
+
+    if video_key == "tasks":
+        TASK_VIDEO_LINK = new_value
+    elif video_key == "sell":
+        SELL_VIDEO_LINK = new_value
+    elif video_key == "howto":
+        HOWTO_VIDEO_LINK = new_value
+
+    if clearing:
+        await message.answer(f"🗑 <b>{label}</b> video link removed. The button will no longer appear.", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+    else:
+        await message.answer(f"✅ <b>{label}</b> video link updated!\n\n🔗 {new_value}", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+
 @dp.message(F.text == "🔍 Find ID", StateFilter("*"))
 async def admin_btn_find_id(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -4181,8 +4620,39 @@ async def process_unban_user_step(message: Message, state: FSMContext):
 async def admin_btn_broadcast(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✉️ Message", callback_data="bc_type:message", style="primary")
+    kb.button(text="🎉 Giveaway", callback_data="bc_type:giveaway", style="success")
+    kb.adjust(2)
+    await message.answer(
+        "📢 <b>Broadcast Center</b>\n\n"
+        "Choose what you want to send out to users:",
+        parse_mode=ParseMode.HTML,
+        reply_markup=kb.as_markup()
+    )
+
+@dp.callback_query(F.data == "bc_type:message")
+async def cb_broadcast_type_message(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
     await state.set_state(AdminState.waiting_for_broadcast)
-    await message.answer("📢 Send or forward the broadcast message below:", parse_mode=ParseMode.MARKDOWN)
+    try:
+        await call.message.edit_text("📢 Send or forward the broadcast message below:")
+    except Exception:
+        await call.message.answer("📢 Send or forward the broadcast message below:")
+
+@dp.callback_query(F.data == "bc_type:giveaway")
+async def cb_broadcast_type_giveaway(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+    await state.set_state(AdminState.waiting_for_giveaway_message)
+    try:
+        await call.message.edit_text("🎉 Send or forward the Giveaway message below (text, photo, etc.):")
+    except Exception:
+        await call.message.answer("🎉 Send or forward the Giveaway message below (text, photo, etc.):")
 
 @dp.message(AdminState.waiting_for_broadcast, ~F.text.in_(MENU_BUTTONS))
 async def process_broadcast_message(message: Message, state: FSMContext):
@@ -4327,6 +4797,269 @@ async def process_broadcast_target_selection(call: CallbackQuery, state: FSMCont
     )
     await state.clear()
 
+# ============================================
+# GIVEAWAY SYSTEM
+# ============================================
+
+@dp.message(AdminState.waiting_for_giveaway_message, ~F.text.in_(MENU_BUTTONS))
+async def process_giveaway_message(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    await state.update_data(
+        giveaway_chat_id=message.chat.id,
+        giveaway_message_id=message.message_id
+    )
+    await state.set_state(AdminState.waiting_for_giveaway_emoji)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🎲 Dice", callback_data="gwemoji:dice", style="primary")
+    kb.button(text="🎳 Bowling", callback_data="gwemoji:bowling", style="primary")
+    kb.adjust(2)
+
+    sent = await message.answer(
+        "🎉 <b>Choose the Giveaway game:</b>\n\n"
+        "Users will tap a button to roll and win a random reward (₹1-₹6).",
+        parse_mode=ParseMode.HTML,
+        reply_markup=kb.as_markup()
+    )
+    await state.update_data(last_menu_msg_id=sent.message_id)
+
+@dp.callback_query(F.data.startswith("gwemoji:"), AdminState.waiting_for_giveaway_emoji)
+async def process_giveaway_emoji_selection(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+
+    emoji_key = call.data.split(":", 1)[1]
+    await state.update_data(giveaway_emoji_key=emoji_key)
+    await state.set_state(AdminState.waiting_for_giveaway_target)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🕐 24 Hours", callback_data="gwdur:24")
+    kb.button(text="🕑 48 Hours", callback_data="gwdur:48")
+    kb.button(text="🕒 72 Hours", callback_data="gwdur:72")
+    kb.button(text="👥 All Users", callback_data="gwdur:all")
+    kb.adjust(1)
+
+    try:
+        await call.message.edit_text(
+            "🎉 <b>Select the target audience for this Giveaway:</b>\n\n"
+            "Choose which users (based on their last activity) should receive this Giveaway.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=kb.as_markup()
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(
+                "🎉 <b>Select the target audience for this Giveaway:</b>\n\n"
+                "Choose which users (based on their last activity) should receive this Giveaway.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=kb.as_markup()
+            )
+
+@dp.callback_query(F.data.startswith("gwdur:"), AdminState.waiting_for_giveaway_target)
+async def process_giveaway_target_selection(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+
+    data = await state.get_data()
+    from_chat_id = data.get("giveaway_chat_id")
+    message_id = data.get("giveaway_message_id")
+    emoji_key = data.get("giveaway_emoji_key", "dice")
+    emoji_char = "🎳" if emoji_key == "bowling" else "🎲"
+
+    if not from_chat_id or not message_id:
+        try:
+            await call.message.edit_text("⚠️ Giveaway session expired. Please start again.")
+        except Exception:
+            pass
+        await state.clear()
+        return
+
+    duration_key = call.data.split(":", 1)[1]
+    duration_labels = {
+        "24": "Users active in the last 24 Hours",
+        "48": "Users active in the last 48 Hours",
+        "72": "Users active in the last 72 Hours",
+        "all": "All Users"
+    }
+    label = duration_labels.get(duration_key, "All Users")
+
+    async with db_pool.acquire() as conn:
+        if duration_key == "24":
+            users = await conn.fetch("SELECT user_id FROM users WHERE last_active >= NOW() - INTERVAL '24 hours'")
+        elif duration_key == "48":
+            users = await conn.fetch("SELECT user_id FROM users WHERE last_active >= NOW() - INTERVAL '48 hours'")
+        elif duration_key == "72":
+            users = await conn.fetch("SELECT user_id FROM users WHERE last_active >= NOW() - INTERVAL '72 hours'")
+        else:
+            users = await conn.fetch("SELECT user_id FROM users")
+
+    if not users:
+        try:
+            await call.message.edit_text(
+                f"📭 No users found for: <b>{label}</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_back_inline_keyboard()
+            )
+        except Exception:
+            pass
+        await state.clear()
+        return
+
+    async with db_pool.acquire() as conn:
+        giveaway_id = await conn.fetchval(
+            "INSERT INTO giveaways (emoji_type) VALUES ($1) RETURNING id",
+            emoji_key
+        )
+
+    play_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=f"{emoji_char} Try Your Luck!", callback_data=f"gwplay:{giveaway_id}", style="success")
+    ]])
+
+    total_users = len(users)
+    try:
+        status_msg = await call.message.edit_text(
+            f"⏳ <b>Giveaway broadcast in progress...</b>\n"
+            f"🎯 Target: <b>{label}</b>\n"
+            f"Total targets: <b>{total_users}</b>",
+            parse_mode=ParseMode.HTML
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            status_msg = await call.message.answer(
+                f"⏳ <b>Giveaway broadcast in progress...</b>\n"
+                f"🎯 Target: <b>{label}</b>\n"
+                f"Total targets: <b>{total_users}</b>",
+                parse_mode=ParseMode.HTML
+            )
+        else:
+            status_msg = call.message
+
+    success_count = 0
+    fail_count = 0
+
+    for idx, u in enumerate(users, start=1):
+        target_id = u['user_id']
+        try:
+            await bot.copy_message(
+                chat_id=target_id,
+                from_chat_id=from_chat_id,
+                message_id=message_id,
+                reply_markup=play_kb
+            )
+            success_count += 1
+        except TelegramForbiddenError:
+            fail_count += 1
+        except Exception:
+            fail_count += 1
+
+        if idx % 20 == 0 or idx == total_users:
+            try:
+                await status_msg.edit_text(
+                    f"⏳ <b>Broadcasting Giveaway...</b> ({idx}/{total_users})\n"
+                    f"🎯 Target: <b>{label}</b>\n\n"
+                    f"🟢 Success: <b>{success_count}</b>\n"
+                    f"🔴 Failed: <b>{fail_count}</b>",
+                    parse_mode=ParseMode.HTML
+                )
+            except Exception:
+                pass
+
+        await asyncio.sleep(0.04)
+
+    await status_msg.edit_text(
+        f"✅ <b>Giveaway #{giveaway_id} Broadcast Completed!</b>\n\n"
+        f"🎯 <b>Target:</b> {label}\n"
+        f"🎮 <b>Game:</b> {emoji_char}\n"
+        f"📊 <b>Total Users Processed:</b> {total_users}\n"
+        f"🟢 <b>Successfully Sent:</b> {success_count}\n"
+        f"🔴 <b>Failed / Blocked:</b> {fail_count}",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_back_inline_keyboard()
+    )
+    await bot.send_message(
+        ADMIN_ID,
+        "🏠 Back to Admin Menu",
+        reply_markup=get_admin_menu_keyboard()
+    )
+    await state.clear()
+
+@dp.callback_query(F.data.startswith("gwplay:"))
+async def cb_giveaway_play(call: CallbackQuery):
+    user_id = call.from_user.id
+    giveaway_id = int(call.data.split(":", 1)[1])
+
+    async with db_pool.acquire() as conn:
+        already = await conn.fetchval(
+            "SELECT id FROM giveaway_plays WHERE giveaway_id=$1 AND user_id=$2",
+            giveaway_id, user_id
+        )
+        if already:
+            await call.answer("⚠️ You already played this Giveaway!", show_alert=True)
+            return
+
+        giveaway_row = await conn.fetchrow("SELECT emoji_type FROM giveaways WHERE id=$1", giveaway_id)
+
+    if not giveaway_row:
+        await call.answer("⚠️ This Giveaway is no longer valid.", show_alert=True)
+        return
+
+    await call.answer()
+
+    # Button disappears immediately - it should only be usable once
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    emoji_char = "🎳" if giveaway_row['emoji_type'] == "bowling" else "🎲"
+
+    try:
+        dice_msg = await bot.send_dice(chat_id=user_id, emoji=emoji_char)
+        value = dice_msg.dice.value
+    except Exception:
+        return
+
+    await asyncio.sleep(4)
+
+    reward = float(value)
+
+    async with db_pool.acquire() as conn:
+        insert_result = await conn.execute(
+            "INSERT INTO giveaway_plays (giveaway_id, user_id, value, reward) VALUES ($1, $2, $3, $4) ON CONFLICT (giveaway_id, user_id) DO NOTHING",
+            giveaway_id, user_id, value, reward
+        )
+        if insert_result != "INSERT 0 1":
+            return  # Already credited by a concurrent tap - avoid double-paying
+
+        await ensure_user(user_id, conn=conn)
+        await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", reward, user_id)
+        await conn.execute(
+            "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
+            user_id, "giveaway", reward, f"Giveaway #{giveaway_id} - {emoji_char} rolled {value}"
+        )
+
+    invalidate_user_cache(user_id)
+
+    user_data = await get_user_data(user_id)
+    reward_str = format_currency(reward, user_data['currency'] if user_data else 'INR')
+
+    await bot.send_message(
+        user_id,
+        f"🎉 You Win {reward_str}, Reward Has Been Credited To Your Balance!",
+        parse_mode=ParseMode.HTML
+    )
+
+    await bot.send_message(
+        ADMIN_ID,
+        f"🎉 <code>{user_id}</code> Wins ₹{reward:.2f}!",
+        parse_mode=ParseMode.HTML
+    )
+
 @dp.message(F.text == "⚙️ Change Values", StateFilter("*"))
 async def admin_btn_change_values(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -4338,16 +5071,18 @@ async def admin_btn_change_values(message: Message, state: FSMContext):
     min_w_usd = MIN_WITHDRAWAL_AMT / USD_TO_INR
 
     text = (
-        f"⚙️ <b>Change System Rates & Limits</b>\n\n"
-        f"📝 <b>Current Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} (${task_usd:.2f})\n"
-        f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
-        f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
-        f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
-        f"🔒 <b>Password Mode:</b> {'🟢 Fixed Default Password' if DEFAULT_TASK_PASS_STATUS else '🔴 Random Generated Password'}\n"
-        f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
-        f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
-        f"✍️ <b>Single Tasks System:</b> {'🟢 ON (1 Task at a time)' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited tasks without waiting for review)'}\n"
-        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n\n"
+        f"⚙️ <b>Change System Rates & Limits</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📝 <b>Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} <i>(${task_usd:.2f})</i>\n"
+        f"📨 <b>Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} <i>(${sell_usd:.2f})</i>\n"
+        f"💸 <b>Min. Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} <i>(${min_w_usd:.2f})</i>\n"
+        f"🔑 <b>Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
+        f"🔒 <b>Password Mode:</b> {'🟢 Fixed Default' if DEFAULT_TASK_PASS_STATUS else '🔴 Random'}\n"
+        f"🏷 <b>Fees:</b> UPI ₹{UPI_FEES:.2f} • USDT ₹{USDT_FEES:.2f} • Ultra ₹{ULTRA_FEES:.2f}\n"
+        f"⚡️ <b>Ultra Token:</b> <code>{ULTRA_TOKEN}</code>\n"
+        f"✍️ <b>Single Tasks:</b> {'🟢 ON' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited)'}\n"
+        f"📨 <b>Sell Gmail:</b> {'🟢 ON' if SELL_GMAIL_STATUS else '🔴 OFF'}\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
         f"Select an option below to update:"
     )
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_change_values_inline_keyboard())
@@ -4370,16 +5105,18 @@ async def cb_admin_toggle_task_pass_mode(call: CallbackQuery):
     min_w_usd = MIN_WITHDRAWAL_AMT / USD_TO_INR
 
     text = (
-        f"⚙️ <b>Change System Rates & Limits</b>\n\n"
-        f"📝 <b>Current Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} (${task_usd:.2f})\n"
-        f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
-        f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
-        f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
-        f"🔒 <b>Password Mode:</b> {'🟢 Fixed Default Password' if DEFAULT_TASK_PASS_STATUS else '🔴 Random Generated Password'}\n"
-        f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
-        f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
-        f"✍️ <b>Single Tasks System:</b> {'🟢 ON (1 Task at a time)' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited tasks without waiting for review)'}\n"
-        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n\n"
+        f"⚙️ <b>Change System Rates & Limits</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📝 <b>Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} <i>(${task_usd:.2f})</i>\n"
+        f"📨 <b>Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} <i>(${sell_usd:.2f})</i>\n"
+        f"💸 <b>Min. Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} <i>(${min_w_usd:.2f})</i>\n"
+        f"🔑 <b>Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
+        f"🔒 <b>Password Mode:</b> {'🟢 Fixed Default' if DEFAULT_TASK_PASS_STATUS else '🔴 Random'}\n"
+        f"🏷 <b>Fees:</b> UPI ₹{UPI_FEES:.2f} • USDT ₹{USDT_FEES:.2f} • Ultra ₹{ULTRA_FEES:.2f}\n"
+        f"⚡️ <b>Ultra Token:</b> <code>{ULTRA_TOKEN}</code>\n"
+        f"✍️ <b>Single Tasks:</b> {'🟢 ON' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited)'}\n"
+        f"📨 <b>Sell Gmail:</b> {'🟢 ON' if SELL_GMAIL_STATUS else '🔴 OFF'}\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
         f"Select an option below to update:"
     )
 
@@ -4406,16 +5143,18 @@ async def cb_admin_toggle_single_task(call: CallbackQuery):
     min_w_usd = MIN_WITHDRAWAL_AMT / USD_TO_INR
 
     text = (
-        f"⚙️ <b>Change System Rates & Limits</b>\n\n"
-        f"📝 <b>Current Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} (${task_usd:.2f})\n"
-        f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
-        f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
-        f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
-        f"🔒 <b>Password Mode:</b> {'🟢 Fixed Default Password' if DEFAULT_TASK_PASS_STATUS else '🔴 Random Generated Password'}\n"
-        f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
-        f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
-        f"✍️ <b>Single Tasks System:</b> {'🟢 ON (1 Task at a time)' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited tasks without waiting for review)'}\n"
-        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n\n"
+        f"⚙️ <b>Change System Rates & Limits</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📝 <b>Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} <i>(${task_usd:.2f})</i>\n"
+        f"📨 <b>Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} <i>(${sell_usd:.2f})</i>\n"
+        f"💸 <b>Min. Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} <i>(${min_w_usd:.2f})</i>\n"
+        f"🔑 <b>Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
+        f"🔒 <b>Password Mode:</b> {'🟢 Fixed Default' if DEFAULT_TASK_PASS_STATUS else '🔴 Random'}\n"
+        f"🏷 <b>Fees:</b> UPI ₹{UPI_FEES:.2f} • USDT ₹{USDT_FEES:.2f} • Ultra ₹{ULTRA_FEES:.2f}\n"
+        f"⚡️ <b>Ultra Token:</b> <code>{ULTRA_TOKEN}</code>\n"
+        f"✍️ <b>Single Tasks:</b> {'🟢 ON' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited)'}\n"
+        f"📨 <b>Sell Gmail:</b> {'🟢 ON' if SELL_GMAIL_STATUS else '🔴 OFF'}\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
         f"Select an option below to update:"
     )
 
@@ -4442,16 +5181,18 @@ async def cb_admin_toggle_sell_gmail(call: CallbackQuery):
     min_w_usd = MIN_WITHDRAWAL_AMT / USD_TO_INR
 
     text = (
-        f"⚙️ <b>Change System Rates & Limits</b>\n\n"
-        f"📝 <b>Current Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} (${task_usd:.2f})\n"
-        f"📨 <b>Current Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} (${sell_usd:.2f})\n"
-        f"💸 <b>Current Minimum Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} (${min_w_usd:.2f})\n"
-        f"🔑 <b>Current Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
-        f"🔒 <b>Password Mode:</b> {'🟢 Fixed Default Password' if DEFAULT_TASK_PASS_STATUS else '🔴 Random Generated Password'}\n"
-        f"🏷 <b>Current Fees:</b> UPI: ₹{UPI_FEES:.2f} | USDT: ₹{USDT_FEES:.2f} | Ultra: ₹{ULTRA_FEES:.2f}\n"
-        f"⚡️ <b>Ultra API Token:</b> <code>{ULTRA_TOKEN}</code>\n"
-        f"✍️ <b>Single Tasks System:</b> {'🟢 ON (1 Task at a time)' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited tasks without waiting for review)'}\n"
-        f"📨 <b>Sell Gmail Function:</b> {'🟢 ON (Enabled)' if SELL_GMAIL_STATUS else '🔴 OFF (Disabled)'}\n\n"
+        f"⚙️ <b>Change System Rates & Limits</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📝 <b>Tasks Rate:</b> ₹{DEFAULT_TASK_RATE:.2f} <i>(${task_usd:.2f})</i>\n"
+        f"📨 <b>Sell Rate:</b> ₹{GMAIL_SELL_RATE:.2f} <i>(${sell_usd:.2f})</i>\n"
+        f"💸 <b>Min. Withdrawal:</b> ₹{MIN_WITHDRAWAL_AMT:.2f} <i>(${min_w_usd:.2f})</i>\n"
+        f"🔑 <b>Task Password:</b> <code>{DEFAULT_TASK_PASS}</code>\n"
+        f"🔒 <b>Password Mode:</b> {'🟢 Fixed Default' if DEFAULT_TASK_PASS_STATUS else '🔴 Random'}\n"
+        f"🏷 <b>Fees:</b> UPI ₹{UPI_FEES:.2f} • USDT ₹{USDT_FEES:.2f} • Ultra ₹{ULTRA_FEES:.2f}\n"
+        f"⚡️ <b>Ultra Token:</b> <code>{ULTRA_TOKEN}</code>\n"
+        f"✍️ <b>Single Tasks:</b> {'🟢 ON' if SINGLE_TASK_STATUS else '🔴 OFF (Unlimited)'}\n"
+        f"📨 <b>Sell Gmail:</b> {'🟢 ON' if SELL_GMAIL_STATUS else '🔴 OFF'}\n"
+        f"━━━━━━━━━━━━━━━━━━\n\n"
         f"Select an option below to update:"
     )
 
