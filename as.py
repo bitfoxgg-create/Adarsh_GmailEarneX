@@ -932,7 +932,7 @@ def get_change_values_inline_keyboard():
         style="primary"
     )
     
-    pass_mode_text = f"🔑 4b. Password Mode: {'🟢 Fixed (Default)' if DEFAULT_TASK_PASS_STATUS else '🔴 Random'}"
+    pass_mode_text = f"🔑 5. Password Mode: {'🟢 Fixed (Default)' if DEFAULT_TASK_PASS_STATUS else '🔴 Random'}"
     kb.button(
         text=pass_mode_text,
         callback_data="admin_toggle_task_pass_mode",
@@ -940,24 +940,24 @@ def get_change_values_inline_keyboard():
     )
 
     kb.button(
-        text="💰 5. Change Fees",
+        text="💰 6. Change Fees",
         callback_data="admin_change_fees",
         style="primary"
     )
     kb.button(
-        text="⚡️ 6. Change Ultra",
+        text="⚡️ 7. Change Ultra",
         callback_data="admin_change_ultra",
         style="primary"
     )
     
-    single_task_btn_text = f"✍️ 7. Single Tasks: {'🟢 ON' if SINGLE_TASK_STATUS else '🔴 OFF'}"
+    single_task_btn_text = f"✍️ 8. Single Tasks: {'🟢 ON' if SINGLE_TASK_STATUS else '🔴 OFF'}"
     kb.button(
         text=single_task_btn_text,
         callback_data="admin_toggle_single_task",
         style="success" if SINGLE_TASK_STATUS else "danger"
     )
 
-    sell_gmail_btn_text = f"📨 8. Sell Gmail: {'🟢 ON' if SELL_GMAIL_STATUS else '🔴 OFF'}"
+    sell_gmail_btn_text = f"📨 9. Sell Gmail: {'🟢 ON' if SELL_GMAIL_STATUS else '🔴 OFF'}"
     kb.button(
         text=sell_gmail_btn_text,
         callback_data="admin_toggle_sell_gmail",
@@ -989,6 +989,13 @@ def get_validator_admin_inline_keyboard():
     )
     kb.adjust(2, 1)
     return kb.as_markup()
+
+UNASSIGN_MENU_TEXT = (
+    "🗑 <b>Unassign Active Tasks</b>\n\n"
+    "Choose an option below:\n"
+    "• <b>User ID:</b> Unassign current active task of a specific user.\n"
+    "• <b>All Users:</b> Unassign all active tasks across all users and return them to the pool."
+)
 
 def get_unassign_inline_keyboard():
     kb = InlineKeyboardBuilder()
@@ -1048,11 +1055,11 @@ def get_withdraw_options_keyboard():
         kb.adjust(1, 1, 1)
     return kb.as_markup()
 
-def get_back_inline_keyboard():
+def get_back_inline_keyboard(callback_data: str = "menu_back"):
     kb = InlineKeyboardBuilder()
     kb.button(
         text="⬅️ Back",
-        callback_data="menu_back"
+        callback_data=callback_data
     )
     kb.adjust(1)
     return kb.as_markup()
@@ -1537,6 +1544,22 @@ async def cb_menu_back(call: CallbackQuery, state: FSMContext):
             await state.update_data(last_menu_msg_id=call.message.message_id)
     else:
         await state.update_data(last_menu_msg_id=call.message.message_id)
+
+@dp.callback_query(F.data == "back_admin_menu")
+async def cb_back_admin_menu(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+    await state.clear()
+    try:
+        await call.message.edit_text(
+            "🛠 <b>Returned to Admin Menu.</b>\n\nChoose an option from the menu below.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=None
+        )
+    except Exception:
+        pass
+    await call.message.answer("🏠 Returned to Admin Menu.", reply_markup=get_admin_menu_keyboard())
 
 @dp.callback_query(F.data == "menu_referrals")
 async def cb_referrals(call: CallbackQuery, state: FSMContext):
@@ -3181,6 +3204,37 @@ async def admin_btn_pending_reviews(message: Message, state: FSMContext):
         reply_markup=get_pending_reviews_inline_keyboard()
     )
 
+@dp.callback_query(F.data == "back_pending_reviews")
+async def cb_back_pending_reviews(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+    await state.clear()
+
+    async with db_pool.acquire() as conn:
+        task_count = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status = 'pending_review'") or 0
+        sell_count = await conn.fetchval("SELECT COUNT(*) FROM pending_sells WHERE status = 'pending_review'") or 0
+
+    total_pending = task_count + sell_count
+
+    if total_pending == 0:
+        text = "📭 <b>No pending reviews (tasks or sell requests) found!</b>"
+        kb = get_back_inline_keyboard("back_admin_menu")
+    else:
+        text = (
+            f"📥 <b>Pending Reviews Dashboard</b>\n\n"
+            f"📨 <b>Pending Sell Gmail:</b> <code>{sell_count}</code>\n"
+            f"✍️ <b>Pending Task Gmail:</b> <code>{task_count}</code>\n\n"
+            f"Click an option below to view requests:"
+        )
+        kb = get_pending_reviews_inline_keyboard()
+
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
 @dp.callback_query(F.data == "admin_view_pending_sells")
 async def cb_admin_view_pending_sells(call: CallbackQuery):
     await call.answer()
@@ -3197,10 +3251,10 @@ async def cb_admin_view_pending_sells(call: CallbackQuery):
 
     if not sell_rows:
         try:
-            await call.message.edit_text("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+            await call.message.edit_text("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_pending_reviews"))
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e):
-                await call.message.answer("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+                await call.message.answer("📭 <b>No pending sell Gmail requests found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_pending_reviews"))
         return
 
     await call.message.answer(f"📨 <b>Displaying {len(sell_rows)} pending Gmail sell request(s):</b>", parse_mode=ParseMode.HTML)
@@ -3258,10 +3312,10 @@ async def cb_admin_view_pending_tasks(call: CallbackQuery):
 
     if not task_rows:
         try:
-            await call.message.edit_text("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+            await call.message.edit_text("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_pending_reviews"))
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e):
-                await call.message.answer("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+                await call.message.answer("📭 <b>No pending task submissions found!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_pending_reviews"))
         return
 
     await call.message.answer(f"✍️ <b>Displaying {len(task_rows)} pending task submission(s):</b>", parse_mode=ParseMode.HTML)
@@ -3330,6 +3384,40 @@ async def admin_btn_pending_withdrawals(message: Message, state: FSMContext):
         reply_markup=get_pending_withdrawals_inline_keyboard()
     )
 
+@dp.callback_query(F.data == "back_pending_withdrawals")
+async def cb_back_pending_withdrawals(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+    await state.clear()
+
+    async with db_pool.acquire() as conn:
+        upi_count = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending' AND method ILIKE '%UPI%'") or 0
+        usdt_count = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending' AND method ILIKE '%USDT%'") or 0
+        ultra_count = await conn.fetchval("SELECT COUNT(*) FROM withdrawals WHERE status = 'pending' AND method ILIKE '%Ultra%'") or 0
+
+    total_pending = upi_count + usdt_count + ultra_count
+
+    if total_pending == 0:
+        text = "📭 <b>No pending withdrawal requests found!</b>"
+        kb = get_back_inline_keyboard("back_admin_menu")
+    else:
+        ultra_line = f"\n⚡️ <b>Ultra Gateway Pending:</b> <code>{ultra_count}</code>" if ULTRA_STATUS else ""
+        text = (
+            f"💸 <b>Pending Withdrawals Dashboard</b>\n\n"
+            f"🏦 <b>UPI Pending:</b> <code>{upi_count}</code>\n"
+            f"🪙 <b>USDT BEP-20 Pending:</b> <code>{usdt_count}</code>"
+            f"{ultra_line}\n\n"
+            f"Select a method below to review requests:"
+        )
+        kb = get_pending_withdrawals_inline_keyboard()
+
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
 @dp.callback_query(F.data.startswith("admin_view_pending_withdraw_"))
 async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
     await call.answer()
@@ -3358,10 +3446,10 @@ async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
 
     if not withdraw_rows:
         try:
-            await call.message.edit_text(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+            await call.message.edit_text(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_pending_withdrawals"))
         except TelegramBadRequest as e:
             if "message is not modified" not in str(e):
-                await call.message.answer(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+                await call.message.answer(f"📭 <b>No pending withdrawal requests for {display_label}!</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_pending_withdrawals"))
         return
 
     await call.message.answer(f"💸 <b>Displaying {len(withdraw_rows)} pending withdrawal request(s) for {display_label}:</b>", parse_mode=ParseMode.HTML)
@@ -3729,13 +3817,22 @@ async def admin_btn_unassign_tasks(message: Message, state: FSMContext):
         return
     await state.clear()
     await message.answer(
-        "🗑 <b>Unassign Active Tasks</b>\n\n"
-        "Choose an option below:\n"
-        "• <b>User ID:</b> Unassign current active task of a specific user.\n"
-        "• <b>All Users:</b> Unassign all active tasks across all users and return them to the pool.",
+        UNASSIGN_MENU_TEXT,
         parse_mode=ParseMode.HTML,
         reply_markup=get_unassign_inline_keyboard()
     )
+
+@dp.callback_query(F.data == "back_unassign_menu")
+async def cb_back_unassign_menu(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+    await state.clear()
+    try:
+        await call.message.edit_text(UNASSIGN_MENU_TEXT, parse_mode=ParseMode.HTML, reply_markup=get_unassign_inline_keyboard())
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(UNASSIGN_MENU_TEXT, parse_mode=ParseMode.HTML, reply_markup=get_unassign_inline_keyboard())
 
 @dp.callback_query(F.data == "unassign_by_user_id")
 async def start_unassign_user_id(call: CallbackQuery, state: FSMContext):
@@ -3762,10 +3859,10 @@ async def start_unassign_all_users(call: CallbackQuery, state: FSMContext):
 
         if not active_assignments:
             try:
-                await call.message.edit_text("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+                await call.message.edit_text("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_unassign_menu"))
             except TelegramBadRequest as e:
                 if "message is not modified" not in str(e):
-                    await call.message.answer("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+                    await call.message.answer("📭 <b>No active assigned tasks found to unassign.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_unassign_menu"))
             return
 
         task_ids = [r['task_id'] for r in active_assignments]
@@ -3786,10 +3883,10 @@ async def start_unassign_all_users(call: CallbackQuery, state: FSMContext):
 
     count = len(task_ids)
     try:
-        await call.message.edit_text(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+        await call.message.edit_text(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_unassign_menu"))
     except TelegramBadRequest as e:
         if "message is not modified" not in str(e):
-            await call.message.answer(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+            await call.message.answer(f"✅ <b>Successfully unassigned {count} active task(s) from all users, removed active task messages, and returned them to the pool.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_unassign_menu"))
 
     for r in active_assignments:
         uid = r['user_id']
@@ -3868,19 +3965,46 @@ def get_dustbin_menu_keyboard():
     kb.adjust(2)
     return kb.as_markup()
 
+def get_dustbin_clear_confirm_keyboard():
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Yes, Clear It", callback_data="dustbin_clear_confirm", style="danger")
+    kb.button(text="❌ Cancel", callback_data="dustbin_clear_cancel", style="primary")
+    kb.adjust(2)
+    return kb.as_markup()
+
+DUSTBIN_MENU_TEXT = (
+    "🤖 <b>Dustbin</b>\n\n"
+    "• <b>Clear Dust:</b> Moves every <b>Available</b> and <b>Assigned</b> task into the Dustbin "
+    "(any user with an active assigned task is notified and returned to the main menu). "
+    "<b>Pending Review</b> and <b>Completed</b> tasks are never touched.\n"
+    "• <b>See Dustbin:</b> Browse dustbinned tasks and Restore, Delete, or Replace their Gmail username."
+)
+
+async def render_dustbin_menu(call: CallbackQuery):
+    try:
+        await call.message.edit_text(DUSTBIN_MENU_TEXT, parse_mode=ParseMode.HTML, reply_markup=get_dustbin_menu_keyboard())
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(DUSTBIN_MENU_TEXT, parse_mode=ParseMode.HTML, reply_markup=get_dustbin_menu_keyboard())
+
 @dp.message(F.text == "🤖Dustbin", StateFilter("*"))
 async def admin_btn_dustbin(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     await state.clear()
     await message.answer(
-        "🤖 <b>Dustbin</b>\n\n"
-        "• <b>Clear Dust:</b> Unassigns all active tasks (notifying affected users) and moves all "
-        "available/assigned tasks (not Pending Review) into the Dustbin, removing them from the task pool.\n"
-        "• <b>See Dustbin:</b> Browse dustbinned tasks and Restore, Delete, or Replace their Gmail username.",
+        DUSTBIN_MENU_TEXT,
         parse_mode=ParseMode.HTML,
         reply_markup=get_dustbin_menu_keyboard()
     )
+
+@dp.callback_query(F.data == "back_dustbin_menu")
+async def cb_back_dustbin_menu(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+    await state.clear()
+    await render_dustbin_menu(call)
 
 @dp.callback_query(F.data == "dustbin_clear")
 async def cb_dustbin_clear(call: CallbackQuery, state: FSMContext):
@@ -3890,14 +4014,58 @@ async def cb_dustbin_clear(call: CallbackQuery, state: FSMContext):
     await state.clear()
 
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("SELECT id, title, details, reward, added_by, status FROM tasks WHERE status != 'pending_review'")
+        avail_count = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='available'") or 0
+        assigned_count = await conn.fetchval("SELECT COUNT(*) FROM tasks WHERE status='assigned'") or 0
+
+    total_count = avail_count + assigned_count
+
+    if total_count == 0:
+        try:
+            await call.message.edit_text("📭 <b>No Available or Assigned tasks found to move to the Dustbin.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_dustbin_menu"))
+        except TelegramBadRequest as e:
+            if "message is not modified" not in str(e):
+                await call.message.answer("📭 <b>No Available or Assigned tasks found to move to the Dustbin.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_dustbin_menu"))
+        return
+
+    text = (
+        "🧹 <b>Confirm Clear Dust</b>\n\n"
+        f"🟢 <b>Available Tasks:</b> <code>{avail_count}</code>\n"
+        f"🟡 <b>Assigned Tasks:</b> <code>{assigned_count}</code>\n"
+        f"📦 <b>Total to move to Dustbin:</b> <code>{total_count}</code>\n\n"
+        "⚠️ Users with an active assigned task will be notified and their task message removed.\n"
+        "✅ <b>Pending Review</b> and <b>Completed</b> tasks will <u>not</u> be touched.\n\n"
+        "Proceed?"
+    )
+    try:
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_dustbin_clear_confirm_keyboard())
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_dustbin_clear_confirm_keyboard())
+
+@dp.callback_query(F.data == "dustbin_clear_cancel")
+async def cb_dustbin_clear_cancel(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer("Cancelled.")
+    await state.clear()
+    await render_dustbin_menu(call)
+
+@dp.callback_query(F.data == "dustbin_clear_confirm")
+async def cb_dustbin_clear_confirm(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+    await state.clear()
+
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch("SELECT id, title, details, reward, added_by, status FROM tasks WHERE status IN ('available', 'assigned')")
 
         if not rows:
             try:
-                await call.message.edit_text("📭 <b>No tasks found to move to the Dustbin.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+                await call.message.edit_text("📭 <b>No Available or Assigned tasks found to move to the Dustbin.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_dustbin_menu"))
             except TelegramBadRequest as e:
                 if "message is not modified" not in str(e):
-                    await call.message.answer("📭 <b>No tasks found to move to the Dustbin.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+                    await call.message.answer("📭 <b>No Available or Assigned tasks found to move to the Dustbin.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_dustbin_menu"))
             return
 
         task_ids = [r['id'] for r in rows]
@@ -3920,22 +4088,25 @@ async def cb_dustbin_clear(call: CallbackQuery, state: FSMContext):
     total_count = len(task_ids)
     unassigned_count = len(assigned_rows)
 
+    result_text = (
+        f"✅ <b>Dustbin Cleared!</b>\n\n"
+        f"🗑 <b>Total tasks moved to Dustbin:</b> <code>{total_count}</code>\n"
+        f"👤 <b>Active users unassigned & notified:</b> <code>{unassigned_count}</code>\n\n"
+        f"ℹ️ <i>Pending Review and Completed tasks were left untouched.</i>"
+    )
+
     try:
         await call.message.edit_text(
-            f"✅ <b>Dustbin Cleared!</b>\n\n"
-            f"🗑 <b>Total tasks moved to Dustbin:</b> {total_count}\n"
-            f"👤 <b>Active users unassigned & notified:</b> {unassigned_count}",
+            result_text,
             parse_mode=ParseMode.HTML,
-            reply_markup=get_back_inline_keyboard()
+            reply_markup=get_back_inline_keyboard("back_dustbin_menu")
         )
     except TelegramBadRequest as e:
         if "message is not modified" not in str(e):
             await call.message.answer(
-                f"✅ <b>Dustbin Cleared!</b>\n\n"
-                f"🗑 <b>Total tasks moved to Dustbin:</b> {total_count}\n"
-                f"👤 <b>Active users unassigned & notified:</b> {unassigned_count}",
+                result_text,
                 parse_mode=ParseMode.HTML,
-                reply_markup=get_back_inline_keyboard()
+                reply_markup=get_back_inline_keyboard("back_dustbin_menu")
             )
 
     for r in assigned_rows:
@@ -4002,10 +4173,10 @@ async def cb_dustbin_view(call: CallbackQuery, state: FSMContext):
         total = await conn.fetchval("SELECT COUNT(*) FROM dustbin_tasks")
         if total == 0:
             try:
-                await call.message.edit_text("📭 <b>Dustbin is empty.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+                await call.message.edit_text("📭 <b>Dustbin is empty.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_dustbin_menu"))
             except TelegramBadRequest as e:
                 if "message is not modified" not in str(e):
-                    await call.message.answer("📭 <b>Dustbin is empty.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+                    await call.message.answer("📭 <b>Dustbin is empty.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_dustbin_menu"))
             return
 
         page = max(1, min(page, total))
@@ -4044,7 +4215,7 @@ async def cb_dustbin_restore(call: CallbackQuery):
 
     await call.answer("♻️ Task restored to the pool!", show_alert=True)
     try:
-        await call.message.edit_text("♻️ <b>Task has been restored to the available pool.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+        await call.message.edit_text("♻️ <b>Task has been restored to the available pool.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_dustbin_menu"))
     except Exception:
         pass
 
@@ -4063,7 +4234,7 @@ async def cb_dustbin_delete(call: CallbackQuery):
 
     await call.answer("🗑 Task permanently deleted!", show_alert=True)
     try:
-        await call.message.edit_text("🗑 <b>Task has been permanently deleted from the Dustbin.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard())
+        await call.message.edit_text("🗑 <b>Task has been permanently deleted from the Dustbin.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_dustbin_menu"))
     except Exception:
         pass
 
@@ -4660,9 +4831,20 @@ async def process_broadcast_message(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
 
+    # Detect if the admin forwarded this message to us (vs. typed/sent it directly).
+    # Covers both the newer Bot API (forward_origin) and older fields
+    # (forward_date / forward_from / forward_from_chat) for compatibility.
+    is_forwarded = bool(
+        getattr(message, "forward_origin", None)
+        or getattr(message, "forward_date", None)
+        or getattr(message, "forward_from", None)
+        or getattr(message, "forward_from_chat", None)
+    )
+
     await state.update_data(
         broadcast_chat_id=message.chat.id,
-        broadcast_message_id=message.message_id
+        broadcast_message_id=message.message_id,
+        broadcast_is_forwarded=is_forwarded
     )
     await state.set_state(AdminState.waiting_for_broadcast_target)
 
@@ -4690,6 +4872,7 @@ async def process_broadcast_target_selection(call: CallbackQuery, state: FSMCont
     data = await state.get_data()
     from_chat_id = data.get("broadcast_chat_id")
     message_id = data.get("broadcast_message_id")
+    is_forwarded = data.get("broadcast_is_forwarded", False)
 
     if not from_chat_id or not message_id:
         try:
@@ -4724,7 +4907,7 @@ async def process_broadcast_target_selection(call: CallbackQuery, state: FSMCont
             await call.message.edit_text(
                 f"📭 No users found for: <b>{label}</b>",
                 parse_mode=ParseMode.HTML,
-                reply_markup=get_back_inline_keyboard()
+                reply_markup=get_back_inline_keyboard("back_admin_menu")
             )
         except Exception:
             pass
@@ -4756,11 +4939,18 @@ async def process_broadcast_target_selection(call: CallbackQuery, state: FSMCont
     for idx, u in enumerate(users, start=1):
         target_id = u['user_id']
         try:
-            await bot.copy_message(
-                chat_id=target_id,
-                from_chat_id=from_chat_id,
-                message_id=message_id
-            )
+            if is_forwarded:
+                await bot.forward_message(
+                    chat_id=target_id,
+                    from_chat_id=from_chat_id,
+                    message_id=message_id
+                )
+            else:
+                await bot.copy_message(
+                    chat_id=target_id,
+                    from_chat_id=from_chat_id,
+                    message_id=message_id
+                )
             success_count += 1
         except TelegramForbiddenError:
             fail_count += 1
@@ -4788,7 +4978,7 @@ async def process_broadcast_target_selection(call: CallbackQuery, state: FSMCont
         f"🟢 <b>Successfully Sent:</b> {success_count}\n"
         f"🔴 <b>Failed / Blocked:</b> {fail_count}",
         parse_mode=ParseMode.HTML,
-        reply_markup=get_back_inline_keyboard()
+        reply_markup=get_back_inline_keyboard("back_admin_menu")
     )
     await bot.send_message(
         ADMIN_ID,
@@ -4903,7 +5093,7 @@ async def process_giveaway_target_selection(call: CallbackQuery, state: FSMConte
             await call.message.edit_text(
                 f"📭 No users found for: <b>{label}</b>",
                 parse_mode=ParseMode.HTML,
-                reply_markup=get_back_inline_keyboard()
+                reply_markup=get_back_inline_keyboard("back_admin_menu")
             )
         except Exception:
             pass
@@ -4979,7 +5169,7 @@ async def process_giveaway_target_selection(call: CallbackQuery, state: FSMConte
         f"🟢 <b>Successfully Sent:</b> {success_count}\n"
         f"🔴 <b>Failed / Blocked:</b> {fail_count}",
         parse_mode=ParseMode.HTML,
-        reply_markup=get_back_inline_keyboard()
+        reply_markup=get_back_inline_keyboard("back_admin_menu")
     )
     await bot.send_message(
         ADMIN_ID,
