@@ -328,6 +328,11 @@ async def api_me(request: web.Request):
             WHERE ta.user_id=$1 ORDER BY ta.assigned_at DESC LIMIT 1
         ''', user_id)
 
+        total_earning = await conn.fetchval('''
+            SELECT COALESCE(SUM(amount), 0) FROM transactions
+            WHERE user_id=$1 AND type IN ('task', 'sell', 'referral') AND amount > 0
+        ''', user_id)
+
     task_payload = None
     if current_task and current_task['status'] in ('assigned', 'pending_review'):
         try:
@@ -358,6 +363,8 @@ async def api_me(request: web.Request):
         "usdt_address": data['usdt_address'],
         "ultra_number": data['ultra_number'],
         "min_withdrawal_display": format_currency(MIN_WITHDRAWAL_AMT, curr),
+        "total_earning_display": format_currency(total_earning, curr),
+        "task_rate_display": format_currency(DEFAULT_TASK_RATE, curr),
         "sell_rate_display": format_currency(GMAIL_SELL_RATE, curr),
         "sell_enabled": SELL_GMAIL_STATUS,
         "ultra_enabled": ULTRA_STATUS,
