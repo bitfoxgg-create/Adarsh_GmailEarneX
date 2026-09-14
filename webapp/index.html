@@ -61,10 +61,23 @@
   }
 
   .topbar{padding:26px 20px 18px;position:relative;}
+  .topbar-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
   .topbar .brand{
-    font-family:var(--font-display);font-weight:800;font-size:19px;letter-spacing:-.01em;
+    font-family:var(--font-display);font-weight:800;font-size:19px;letter-spacing:-.01em;flex-shrink:0;
   }
   .topbar .brand span{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;}
+
+  .profile-chip{display:flex;align-items:center;gap:8px;background:var(--panel);
+    border:1px solid var(--line);border-radius:999px;padding:5px 13px 5px 5px;
+    max-width:56%;cursor:pointer;user-select:none;}
+  .profile-chip .avatar{width:30px;height:30px;border-radius:50%;flex-shrink:0;object-fit:cover;
+    background:var(--grad);display:flex;align-items:center;justify-content:center;
+    font-family:var(--font-display);font-weight:800;font-size:13px;color:#fff;}
+  .profile-chip .pinfo{min-width:0;overflow:hidden;}
+  .profile-chip .pname{font-size:12.5px;font-weight:700;color:var(--text);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .profile-chip .puser{font-size:10.5px;color:var(--sub);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .balance-pill{
     margin-top:16px;background:linear-gradient(135deg, rgba(124,92,255,.16), rgba(58,160,255,.10));
     border:1px solid rgba(124,92,255,.35);border-radius:var(--radius);
@@ -139,15 +152,18 @@
   .status-chip.ok{background:rgba(74,222,128,.15);color:#4ade80;border:1px solid rgba(74,222,128,.35);}
   .status-chip.off{background:rgba(255,93,122,.15);color:var(--danger);border:1px solid rgba(255,93,122,.35);}
 
-  .input-group{position:relative;margin-bottom:10px;}
-  .input-group .icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--sub);}
-  .input-group input{padding-left:42px;margin-bottom:0;}
-
   input[type=text], input[type=password]{
     width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);
     border-radius:12px;padding:14px 15px;font-size:15px;font-family:var(--font-body);margin-bottom:10px;outline:none;
   }
   input:focus{border-color:var(--violet);}
+
+  /* Must come after the general input rule above so padding-left:42px isn't overridden
+     by the equal-specificity padding:14px 15px rule (that override was causing the
+     icon to sit on top of the placeholder text). */
+  .input-group{position:relative;margin-bottom:10px;}
+  .input-group .icon{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--sub);pointer-events:none;}
+  .input-group input{padding-left:42px;margin-bottom:0;}
 
   .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;text-align:center;border:none;
     border-radius:13px;padding:15px;font-size:15px;font-weight:700;font-family:var(--font-body);cursor:pointer;
@@ -189,6 +205,20 @@
   .empty{text-align:center;color:var(--sub);padding:26px 10px 20px;font-size:14px;
     display:flex;flex-direction:column;align-items:center;gap:8px;}
   .empty .icon{width:30px;height:30px;stroke-width:1.6;opacity:.75;}
+
+  .hist-row{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);}
+  .hist-row:last-child{border-bottom:none;}
+  .hist-row .hist-icon{width:34px;height:34px;border-radius:10px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+  .hist-row .hist-icon.pos{background:rgba(74,222,128,.15);color:#4ade80;}
+  .hist-row .hist-icon.neg{background:rgba(255,93,122,.15);color:var(--danger);}
+  .hist-row .hist-icon .icon{width:16px;height:16px;stroke-width:2.2;}
+  .hist-row .hist-mid{flex:1;min-width:0;}
+  .hist-row .hist-type{font-size:13.5px;font-weight:700;color:var(--text);}
+  .hist-row .hist-note{font-size:11.5px;color:var(--sub);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .hist-row .hist-date{font-size:10.5px;color:var(--sub);margin-top:2px;}
+  .hist-row .hist-amt{font-weight:800;font-size:14px;font-variant-numeric:tabular-nums;flex-shrink:0;}
+  .hist-row .hist-amt.pos{color:#4ade80;}
+  .hist-row .hist-amt.neg{color:var(--danger);}
 
   .closed-notice{display:flex;gap:12px;align-items:flex-start;background:rgba(255,93,122,.08);
     border:1px solid rgba(255,93,122,.35);border-radius:14px;padding:14px 16px;}
@@ -253,7 +283,16 @@
 </svg>
 
 <div class="topbar">
-  <div class="brand">GMAIL<span>EARNEX</span></div>
+  <div class="topbar-row">
+    <div class="brand">GMAIL<span>EARNEX</span></div>
+    <div class="profile-chip" id="profileChip" title="Tap to see your full ID">
+      <div class="avatar" id="profileAvatar">?</div>
+      <div class="pinfo">
+        <div class="pname" id="profileName">—</div>
+        <div class="puser" id="profileUser">—</div>
+      </div>
+    </div>
+  </div>
   <div class="balance-pill">
     <div>
       <div class="lbl"><svg class="icon"><use href="#i-wallet"></use></svg>YOUR BALANCE</div>
@@ -340,6 +379,13 @@
       <svg class="icon"><use href="#i-send"></use></svg><span class="btn-label">Request Withdrawal</span>
     </button>
   </div>
+
+  <div class="card">
+    <div class="icon-badge"><svg class="icon"><use href="#i-card"></use></svg></div>
+    <h2>Balance History</h2>
+    <p class="hint">Your recent balance changes — tasks, sales, withdrawals, referrals, and admin adjustments.</p>
+    <div id="historyList"><div class="empty"><svg class="icon spin"><use href="#i-refresh"></use></svg>Loading…</div></div>
+  </div>
 </section>
 
 <div class="toast" id="toast"></div>
@@ -358,6 +404,40 @@ const initData = tg ? tg.initData : "";
 
 let STATE = null;
 let currentMethod = "upi";
+let TG_USER = null;
+
+function renderProfileChip(){
+  const u = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : null;
+  TG_USER = u;
+  const avatarEl = document.getElementById('profileAvatar');
+  const nameEl = document.getElementById('profileName');
+  const userEl = document.getElementById('profileUser');
+
+  if (!u){
+    nameEl.textContent = 'Guest';
+    userEl.textContent = '—';
+    return;
+  }
+
+  const fullName = [u.first_name, u.last_name].filter(Boolean).join(' ') || 'User';
+  nameEl.textContent = fullName;
+  userEl.textContent = u.username ? `@${u.username} · ID: ${u.id}` : `ID: ${u.id}`;
+
+  if (u.photo_url){
+    avatarEl.innerHTML = '';
+    avatarEl.style.backgroundImage = `url('${u.photo_url}')`;
+    avatarEl.style.backgroundSize = 'cover';
+    avatarEl.style.backgroundPosition = 'center';
+  } else {
+    avatarEl.style.backgroundImage = '';
+    avatarEl.textContent = fullName.charAt(0).toUpperCase();
+  }
+}
+renderProfileChip();
+
+document.getElementById('profileChip').addEventListener('click', ()=>{
+  if (TG_USER) toast(`Your Telegram ID: ${TG_USER.id}`, 'ok');
+});
 
 // ---- Lightweight sound effects (synthesized, no audio files needed) ----
 let audioCtx = null;
@@ -428,6 +508,49 @@ function switchView(name){
   document.getElementById('view-' + name).classList.add('active');
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === name));
   if (name === 'tasks') renderTask();
+  if (name === 'withdraw') loadHistory();
+}
+
+function escapeHtml(str){
+  const d = document.createElement('div');
+  d.textContent = str == null ? '' : String(str);
+  return d.innerHTML;
+}
+
+function fmtHistDate(iso){
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, {month:'short', day:'numeric'}) + ' · ' +
+    d.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
+}
+
+async function loadHistory(){
+  const list = document.getElementById('historyList');
+  try{
+    const data = await api('/api/transactions?limit=30');
+    const items = data.transactions || [];
+    if (!items.length){
+      list.innerHTML = `<div class="empty"><svg class="icon"><use href="#i-inbox"></use></svg>No balance history yet.</div>`;
+      return;
+    }
+    list.innerHTML = items.map(tx => {
+      const sign = tx.positive ? '+' : '-';
+      const cls = tx.positive ? 'pos' : 'neg';
+      const iconId = tx.positive ? 'i-check-circle' : 'i-wallet';
+      const note = tx.note ? `<div class="hist-note">${escapeHtml(tx.note)}</div>` : '';
+      return `
+        <div class="hist-row">
+          <div class="hist-icon ${cls}"><svg class="icon"><use href="#${iconId}"></use></svg></div>
+          <div class="hist-mid">
+            <div class="hist-type">${escapeHtml(tx.type)}</div>
+            ${note}
+            <div class="hist-date">${tx.created_at ? fmtHistDate(tx.created_at) : ''}</div>
+          </div>
+          <div class="hist-amt ${cls}">${sign}${tx.amount_display}</div>
+        </div>`;
+    }).join('');
+  } catch(e){
+    list.innerHTML = `<div class="empty"><svg class="icon"><use href="#i-alert-circle"></use></svg>${e.message}</div>`;
+  }
 }
 
 document.querySelectorAll('nav.tabs button').forEach(btn=>{
@@ -492,6 +615,7 @@ async function loadMe(){
 
     updateWithdrawFee();
     if (document.getElementById('view-tasks').classList.contains('active')) renderTask();
+    if (document.getElementById('view-withdraw').classList.contains('active')) loadHistory();
   } catch(e){
     document.getElementById('balanceAmt').textContent = '—';
     toast(e.message, 'err');
@@ -520,12 +644,15 @@ function renderTask(){
   }
 
   if (t.status === 'pending_review'){
+    const canClaimMore = STATE && STATE.single_task_status === false;
     area.innerHTML = `
       <div class="task-box">
         <div class="field"><span>Task</span><code>#${t.id}</code></div>
         <div class="field"><span>Email</span><code>${t.email}</code></div>
       </div>
-      <div class="empty"><svg class="icon"><use href="#i-inbox"></use></svg>Submitted — waiting for admin review.</div>`;
+      <div class="empty"><svg class="icon"><use href="#i-inbox"></use></svg>Submitted — waiting for admin review.</div>
+      ${canClaimMore ? `<button class="btn btn-primary" id="claimMoreBtn"><svg class="icon"><use href="#i-download"></use></svg><span class="btn-label">Get Another Task</span></button>` : ''}`;
+    if (canClaimMore) document.getElementById('claimMoreBtn').onclick = claimTask;
     return;
   }
 
