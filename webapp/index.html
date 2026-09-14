@@ -140,9 +140,11 @@
   }
   .pay-logo{width:18px;height:18px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;
     border-radius:5px;font-size:10px;font-weight:800;color:#fff;}
-  .pay-logo.upi{background:linear-gradient(135deg,#ff7a1a,#6739b7);}
   .pay-logo.usdt{background:#26a17b;}
   .pay-logo.ultra{background:linear-gradient(135deg,#7c5cff,#3aa0ff);font-size:11px;}
+  .pay-logo-img{width:22px;height:22px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;
+    border-radius:5px;background:#fff;padding:2px;}
+  .pay-logo-img img{width:100%;height:100%;object-fit:contain;display:block;}
 
   .task-box{
     background:var(--panel-2);border:1px solid var(--line);border-radius:14px;
@@ -193,18 +195,18 @@
   </div>
 </div>
 
-<!-- BALANCE / HOME -->
+<!-- HOME -->
 <section class="view active" id="view-home">
   <div class="banner" id="statusBanner" style="display:none;">
     <span>⚠️</span><span id="statusMsg"></span>
   </div>
   <div class="card">
-    <div class="icon-badge">📊</div>
-    <h2>Your Stats</h2>
-    <p class="hint">A quick snapshot of your earnings setup.</p>
-    <div class="row"><div class="k">Min. withdrawal</div><div class="v" id="minWithdraw">—</div></div>
-    <div class="row"><div class="k">Gmail sell rate</div><div class="v" id="sellRate">—</div></div>
-    <div class="row"><div class="k">Selling Gmail</div><div class="v" id="sellEnabled">—</div></div>
+    <div class="icon-badge">🏠</div>
+    <h2>Home</h2>
+    <p class="hint">Your earnings overview at a glance.</p>
+    <div class="row"><div class="k">Your Total Earning</div><div class="v" id="totalEarning">—</div></div>
+    <div class="row"><div class="k">Current Task Rate</div><div class="v" id="taskRate">—</div></div>
+    <div class="row"><div class="k">Sell Rate</div><div class="v" id="sellRateHome">—</div></div>
   </div>
 </section>
 
@@ -237,7 +239,7 @@
     <h2>Withdraw</h2>
     <p class="hint">Pick a method. Fee is deducted automatically from your balance.</p>
     <div class="method-pick">
-      <button data-m="upi" class="active"><span class="pay-logo upi">UPI</span>UPI</button>
+      <button data-m="upi" class="active"><span class="pay-logo-img"><img src="https://upload.wikimedia.org/wikipedia/commons/e/e9/UPI-Logo-vector.svg" alt="UPI"></span>UPI</button>
       <button data-m="usdt"><span class="pay-logo usdt">₮</span>USDT</button>
       <button data-m="ultra" id="ultraTab"><span class="pay-logo ultra">⚡</span>Ultra</button>
     </div>
@@ -251,7 +253,7 @@
 <div class="toast" id="toast"></div>
 
 <nav class="tabs">
-  <button data-view="home" class="active"><span class="ic">📈</span>Stats</button>
+  <button data-view="home" class="active"><span class="ic">🏠</span>Home</button>
   <button data-view="tasks"><span class="ic">🎯</span>Tasks</button>
   <button data-view="sell"><span class="ic">📨</span>Sell</button>
   <button data-view="withdraw"><span class="ic">💸</span>Withdraw</button>
@@ -310,9 +312,9 @@ async function loadMe(){
     amtEl.classList.remove('pop');
     void amtEl.offsetWidth;
     amtEl.classList.add('pop');
-    document.getElementById('minWithdraw').textContent = data.min_withdrawal_display;
-    document.getElementById('sellRate').textContent = data.sell_rate_display;
-    document.getElementById('sellEnabled').textContent = data.sell_enabled ? 'Open' : 'Paused';
+    document.getElementById('totalEarning').textContent = data.total_earning_display;
+    document.getElementById('taskRate').textContent = data.task_rate_display;
+    document.getElementById('sellRateHome').textContent = data.sell_rate_display + ' · ' + (data.sell_enabled ? 'Open' : 'Closed');
     document.getElementById('sellRateInline').textContent = '(' + data.sell_rate_display + ')';
     document.getElementById('ultraTab').style.display = data.ultra_enabled ? '' : 'none';
 
