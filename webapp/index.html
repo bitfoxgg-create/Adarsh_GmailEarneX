@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>GmailEarnex</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --ink:#0c1613;
+    --panel:#12211c;
+    --panel-2:#17281f;
+    --line:#22362c;
+    --mint:#2be3a8;
+    --mint-dim:#1a8f6c;
+    --gold:#f2b64c;
+    --text:#eaf3ee;
+    --sub:#8ea99c;
+    --danger:#ff6b6b;
+    --radius:16px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;background:var(--ink);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  body{padding-bottom:78px;min-height:100vh;}
+
+  .topbar{
+    padding:22px 20px 16px;
+    background:linear-gradient(180deg, var(--panel) 0%, var(--ink) 100%);
+    border-bottom:1px solid var(--line);
+  }
+  .topbar .brand{font-size:13px;letter-spacing:.04em;color:var(--sub);margin-bottom:6px;}
+  .balance-row{display:flex;align-items:baseline;gap:8px;}
+  .balance-amt{font-size:34px;font-weight:700;color:var(--mint);}
+  .balance-refresh{margin-left:auto;background:none;border:1px solid var(--line);color:var(--sub);
+    border-radius:10px;padding:8px 10px;font-size:13px;}
+
+  .view{display:none;padding:18px 16px 8px;animation:fade .18s ease;}
+  .view.active{display:block;}
+  @keyframes fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px;margin-bottom:14px;}
+  .card h2{margin:0 0 4px;font-size:16px;}
+  .card p.hint{margin:0 0 14px;color:var(--sub);font-size:13px;line-height:1.5;}
+
+  .row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;
+    border-bottom:1px solid var(--line);}
+  .row:last-child{border-bottom:none;}
+  .row .k{color:var(--sub);font-size:13px;}
+  .row .v{font-weight:600;font-size:14px;}
+
+  input[type=text], input[type=password]{
+    width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);
+    border-radius:10px;padding:13px 14px;font-size:15px;margin-bottom:10px;outline:none;
+  }
+  input:focus{border-color:var(--mint-dim);}
+
+  .btn{display:block;width:100%;text-align:center;border:none;border-radius:12px;
+    padding:14px;font-size:15px;font-weight:600;cursor:pointer;}
+  .btn-primary{background:var(--mint);color:#062017;}
+  .btn-primary:disabled{background:var(--mint-dim);opacity:.55;}
+  .btn-outline{background:transparent;border:1px solid var(--line);color:var(--text);}
+  .btn-danger{background:transparent;border:1px solid var(--danger);color:var(--danger);}
+  .btn-row{display:flex;gap:10px;}
+  .btn-row .btn{flex:1;}
+
+  .method-pick{display:flex;gap:8px;margin-bottom:14px;}
+  .method-pick button{flex:1;padding:11px 4px;border-radius:10px;border:1px solid var(--line);
+    background:var(--panel-2);color:var(--sub);font-size:13px;font-weight:600;}
+  .method-pick button.active{border-color:var(--mint);color:var(--mint);background:rgba(43,227,168,.08);}
+
+  .task-box{background:var(--panel-2);border:1px dashed var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
+  .task-box .field{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:14px;}
+  .task-box code{background:#0a1310;padding:3px 7px;border-radius:6px;font-size:13px;}
+  .timer{color:var(--gold);font-weight:700;}
+
+  .empty{text-align:center;color:var(--sub);padding:34px 10px;font-size:14px;}
+  .empty .big{font-size:30px;display:block;margin-bottom:8px;}
+
+  .toast{position:fixed;left:16px;right:16px;bottom:92px;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:12px;padding:13px 16px;font-size:13.5px;
+    box-shadow:0 8px 24px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
+    transform:translateY(6px);z-index:50;}
+  .toast.show{opacity:1;transform:translateY(0);}
+  .toast.err{border-color:var(--danger);color:#ffb3b3;}
+  .toast.ok{border-color:var(--mint-dim);color:var(--mint);}
+
+  nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--panel);
+    border-top:1px solid var(--line);display:flex;padding:8px 6px calc(8px + env(safe-area-inset-bottom));}
+  nav.tabs button{flex:1;background:none;border:none;color:var(--sub);font-size:11.5px;
+    display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 2px;}
+  nav.tabs button .ic{font-size:20px;}
+  nav.tabs button.active{color:var(--mint);}
+
+  .skeleton{background:linear-gradient(90deg,var(--panel-2),#1c322a,var(--panel-2));
+    background-size:200% 100%;animation:shimmer 1.2s infinite;border-radius:8px;height:14px;}
+  @keyframes shimmer{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">YOUR BALANCE</div>
+  <div class="balance-row">
+    <div class="balance-amt" id="balanceAmt">···</div>
+    <button class="balance-refresh" id="refreshBtn">↻ Refresh</button>
+  </div>
+</div>
+
+<!-- BALANCE / HOME -->
+<section class="view active" id="view-home">
+  <div class="card">
+    <h2>Overview</h2>
+    <p class="hint">A quick snapshot of your account.</p>
+    <div class="row"><div class="k">Min. withdrawal</div><div class="v" id="minWithdraw">—</div></div>
+    <div class="row"><div class="k">Gmail sell rate</div><div class="v" id="sellRate">—</div></div>
+    <div class="row"><div class="k">Selling Gmail</div><div class="v" id="sellEnabled">—</div></div>
+  </div>
+  <div class="card" id="statusCard" style="display:none;">
+    <h2 style="color:var(--danger)">Bot is Off</h2>
+    <p class="hint" id="statusMsg" style="color:#ffb3b3;"></p>
+  </div>
+</section>
+
+<!-- TASKS -->
+<section class="view" id="view-tasks">
+  <div class="card" id="taskCard">
+    <h2>Available Task</h2>
+    <p class="hint">Grab a task, log into the given Gmail once, then submit for review.</p>
+    <div id="taskArea"></div>
+  </div>
+</section>
+
+<!-- SELL -->
+<section class="view" id="view-sell">
+  <div class="card">
+    <h2>Sell a Gmail</h2>
+    <p class="hint">Send a Gmail you own. It goes to admin for review before you're paid <span id="sellRateInline"></span>.</p>
+    <input type="text" id="sellUser" placeholder="example@gmail.com">
+    <input type="password" id="sellPass" placeholder="Password">
+    <button class="btn btn-primary" id="sellSubmitBtn">Submit for Review</button>
+  </div>
+</section>
+
+<!-- WITHDRAW -->
+<section class="view" id="view-withdraw">
+  <div class="card">
+    <h2>Withdraw</h2>
+    <p class="hint">Pick a method. Fee is deducted automatically from your balance.</p>
+    <div class="method-pick">
+      <button data-m="upi" class="active">UPI</button>
+      <button data-m="usdt">USDT</button>
+      <button data-m="ultra" id="ultraTab">Ultra</button>
+    </div>
+    <input type="text" id="wAddress" placeholder="Enter your UPI ID">
+    <div class="row"><div class="k">Fee</div><div class="v" id="wFee">—</div></div>
+    <div class="row"><div class="k">Minimum</div><div class="v" id="wMin">—</div></div>
+    <button class="btn btn-primary" id="withdrawBtn">Request Withdrawal</button>
+  </div>
+</section>
+
+<div class="toast" id="toast"></div>
+
+<nav class="tabs">
+  <button data-view="home" class="active"><span class="ic">🏠</span>Balance</button>
+  <button data-view="tasks"><span class="ic">🎯</span>Tasks</button>
+  <button data-view="sell"><span class="ic">📨</span>Sell</button>
+  <button data-view="withdraw"><span class="ic">💸</span>Withdraw</button>
+</nav>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+const initData = tg ? tg.initData : "";
+
+let STATE = null;
+let currentMethod = "upi";
+
+function toast(msg, type){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (type || '');
+  clearTimeout(toast._h);
+  toast._h = setTimeout(()=> t.classList.remove('show'), 3200);
+}
+
+async function api(path, opts){
+  opts = opts || {};
+  opts.headers = Object.assign({'X-Telegram-Init-Data': initData}, opts.headers || {});
+  if (opts.body && typeof opts.body !== 'string'){
+    opts.body = JSON.stringify(opts.body);
+    opts.headers['Content-Type'] = 'application/json';
+  }
+  const res = await fetch(path, opts);
+  let data;
+  try { data = await res.json(); } catch(e){ data = {ok:false, error:'Unexpected server response.'}; }
+  if (!res.ok || !data.ok){
+    throw new Error(data.error || 'Something went wrong.');
+  }
+  return data;
+}
+
+function switchView(name){
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === name));
+  if (name === 'tasks') renderTask();
+}
+
+document.querySelectorAll('nav.tabs button').forEach(btn=>{
+  btn.addEventListener('click', ()=> switchView(btn.dataset.view));
+});
+
+async function loadMe(){
+  document.getElementById('balanceAmt').textContent = '···';
+  try{
+    const data = await api('/api/me');
+    STATE = data;
+    document.getElementById('balanceAmt').textContent = data.balance_display;
+    document.getElementById('minWithdraw').textContent = data.min_withdrawal_display;
+    document.getElementById('sellRate').textContent = data.sell_rate_display;
+    document.getElementById('sellEnabled').textContent = data.sell_enabled ? 'Open' : 'Paused';
+    document.getElementById('sellRateInline').textContent = '(' + data.sell_rate_display + ')';
+    document.getElementById('ultraTab').style.display = data.ultra_enabled ? '' : 'none';
+
+    const statusCard = document.getElementById('statusCard');
+    if (!data.bot_status){
+      statusCard.style.display = '';
+      document.getElementById('statusMsg').textContent = data.bot_off_message || 'The bot is temporarily off. Please check back soon.';
+    } else {
+      statusCard.style.display = 'none';
+    }
+
+    updateWithdrawFee();
+    if (document.getElementById('view-tasks').classList.contains('active')) renderTask();
+  } catch(e){
+    document.getElementById('balanceAmt').textContent = '—';
+    toast(e.message, 'err');
+  }
+}
+
+function fmtCountdown(iso){
+  const diff = new Date(iso).getTime() - Date.now();
+  if (diff <= 0) return null;
+  const m = Math.floor(diff/60000), s = Math.floor((diff%60000)/1000);
+  return `${m}m ${s.toString().padStart(2,'0')}s`;
+}
+
+let countdownTimer = null;
+function renderTask(){
+  const area = document.getElementById('taskArea');
+  clearInterval(countdownTimer);
+  const t = STATE && STATE.current_task;
+
+  if (!t){
+    area.innerHTML = `
+      <div class="empty"><span class="big">🎯</span>No active task right now.</div>
+      <button class="btn btn-primary" id="claimBtn">Get a Task</button>`;
+    document.getElementById('claimBtn').onclick = claimTask;
+    return;
+  }
+
+  if (t.status === 'pending_review'){
+    area.innerHTML = `
+      <div class="task-box">
+        <div class="field"><span>Task</span><code>#${t.id}</code></div>
+        <div class="field"><span>Email</span><code>${t.email}</code></div>
+      </div>
+      <div class="empty">📥 Submitted — waiting for admin review.</div>`;
+    return;
+  }
+
+  area.innerHTML = `
+    <div class="task-box">
+      <div class="field"><span>Task</span><code>#${t.id}</code></div>
+      <div class="field"><span>Email</span><code>${t.email}</code></div>
+      <div class="field"><span>Password</span><code>${t.password}</code></div>
+      <div class="field"><span>Reward</span><b>${t.reward_display}</b></div>
+      <div class="field"><span>Time left</span><span class="timer" id="taskTimer">—</span></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-danger" id="cancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="submitBtn">Submit</button>
+    </div>`;
+
+  const tick = ()=>{
+    const left = fmtCountdown(t.expires_at);
+    const el = document.getElementById('taskTimer');
+    if (!el) return;
+    if (left === null){ el.textContent = 'Expired — refresh'; clearInterval(countdownTimer); }
+    else el.textContent = left;
+  };
+  tick();
+  countdownTimer = setInterval(tick, 1000);
+
+  document.getElementById('cancelBtn').onclick = cancelTask;
+  document.getElementById('submitBtn').onclick = submitTask;
+}
+
+async function claimTask(){
+  try{
+    const data = await api('/api/tasks/claim', {method:'POST'});
+    STATE.current_task = Object.assign({status:'assigned'}, data.task);
+    renderTask();
+    toast('Task claimed! You have 30 minutes.', 'ok');
+  } catch(e){ toast(e.message, 'err'); }
+}
+async function submitTask(){
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true; btn.textContent = 'Checking…';
+  try{
+    const data = await api('/api/tasks/submit', {method:'POST'});
+    toast(data.message, 'ok');
+    await loadMe();
+  } catch(e){
+    toast(e.message, 'err');
+    btn.disabled = false; btn.textContent = 'Submit';
+  }
+}
+async function cancelTask(){
+  try{
+    const data = await api('/api/tasks/cancel', {method:'POST'});
+    STATE.current_task = null;
+    renderTask();
+    toast(data.message, 'ok');
+  } catch(e){ toast(e.message, 'err'); }
+}
+
+document.getElementById('sellSubmitBtn').addEventListener('click', async ()=>{
+  const username = document.getElementById('sellUser').value.trim();
+  const password = document.getElementById('sellPass').value.trim();
+  if (!username || !password){ toast('Fill in both fields.', 'err'); return; }
+  const btn = document.getElementById('sellSubmitBtn');
+  btn.disabled = true; btn.textContent = 'Verifying…';
+  try{
+    const data = await api('/api/sell', {method:'POST', body:{username, password}});
+    toast(data.message, 'ok');
+    document.getElementById('sellUser').value = '';
+    document.getElementById('sellPass').value = '';
+  } catch(e){ toast(e.message, 'err'); }
+  finally{ btn.disabled = false; btn.textContent = 'Submit for Review'; }
+});
+
+document.querySelectorAll('.method-pick button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.method-pick button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    currentMethod = btn.dataset.m;
+    const placeholders = {upi:'Enter your UPI ID', usdt:'Enter your USDT (BEP-20) address', ultra:'Enter your Ultra Gateway number'};
+    const savedKey = {upi:'upi', usdt:'usdt_address', ultra:'ultra_number'}[currentMethod];
+    const saved = STATE && STATE[savedKey];
+    document.getElementById('wAddress').placeholder = placeholders[currentMethod];
+    document.getElementById('wAddress').value = (saved && saved !== 'None') ? saved : '';
+    updateWithdrawFee();
+  });
+});
+
+function updateWithdrawFee(){
+  if (!STATE) return;
+  document.getElementById('wFee').textContent = STATE.fees[currentMethod];
+  document.getElementById('wMin').textContent = STATE.min_withdrawal_display;
+}
+
+document.getElementById('withdrawBtn').addEventListener('click', async ()=>{
+  const address = document.getElementById('wAddress').value.trim();
+  if (!address){ toast('Enter your payment address first.', 'err'); return; }
+  const btn = document.getElementById('withdrawBtn');
+  btn.disabled = true; btn.textContent = 'Processing…';
+  try{
+    const data = await api('/api/withdraw', {method:'POST', body:{method: currentMethod, address}});
+    toast(data.message, 'ok');
+    await loadMe();
+  } catch(e){ toast(e.message, 'err'); }
+  finally{ btn.disabled = false; btn.textContent = 'Request Withdrawal'; }
+});
+
+document.getElementById('refreshBtn').addEventListener('click', loadMe);
+
+loadMe();
+</script>
+</body>
+</html>
