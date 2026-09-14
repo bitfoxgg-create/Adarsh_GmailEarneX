@@ -737,18 +737,28 @@ async def api_transactions(request: web.Request):
     curr = user_data['currency']
 
     try:
-        limit = min(int(request.query.get('limit', 30)), 100)
+        page = max(1, int(request.query.get('page', 1)))
     except (TypeError, ValueError):
-        limit = 30
+        page = 1
+    try:
+        page_size = min(max(1, int(request.query.get('page_size', 10))), 50)
+    except (TypeError, ValueError):
+        page_size = 10
 
     async with db_pool.acquire() as conn:
+        total_items = await conn.fetchval('SELECT COUNT(*) FROM transactions WHERE user_id=$1', user_id)
+        total_pages = max(1, (total_items + page_size - 1) // page_size)
+        if page > total_pages:
+            page = total_pages
+        offset = (page - 1) * page_size
+
         tx_rows = await conn.fetch('''
             SELECT type, amount, note, created_at
             FROM transactions
             WHERE user_id=$1
             ORDER BY id DESC
-            LIMIT $2
-        ''', user_id, limit)
+            LIMIT $2 OFFSET $3
+        ''', user_id, page_size, offset)
 
     items = []
     for tx in tx_rows:
@@ -780,7 +790,14 @@ async def api_transactions(request: web.Request):
             "created_at": tx['created_at'].isoformat() + "Z" if tx['created_at'] else None
         })
 
-    return web.json_response({"ok": True, "transactions": items})
+    return web.json_response({
+        "ok": True,
+        "transactions": items,
+        "page": page,
+        "page_size": page_size,
+        "total_items": total_items,
+        "total_pages": total_pages
+    })
 
 def register_webapp_routes(app: web.Application):
     app.router.add_get('/api/me', api_me)
