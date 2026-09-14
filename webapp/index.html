@@ -7,125 +7,164 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
   :root{
-    --ink:#0c1613;
-    --panel:#12211c;
-    --panel-2:#17281f;
-    --line:#22362c;
-    --mint:#2be3a8;
-    --mint-dim:#1a8f6c;
-    --gold:#f2b64c;
-    --text:#eaf3ee;
-    --sub:#8ea99c;
-    --danger:#ff6b6b;
-    --radius:16px;
+    --bg:#0a0d1a;
+    --bg-glow-1:#3b2df0;
+    --bg-glow-2:#00d4ff;
+    --panel:#12162a;
+    --panel-2:#171c33;
+    --line:#242b4a;
+    --violet:#7c5cff;
+    --blue:#3aa0ff;
+    --grad:linear-gradient(90deg,#8b5cf6,#3b82f6);
+    --text:#f3f4f8;
+    --sub:#8d93b8;
+    --danger:#ff5d7a;
+    --gold:#ffc857;
+    --radius:18px;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-  html,body{margin:0;padding:0;background:var(--ink);color:var(--text);
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
-  body{padding-bottom:78px;min-height:100vh;}
-
-  .topbar{
-    padding:22px 20px 16px;
-    background:linear-gradient(180deg, var(--panel) 0%, var(--ink) 100%);
-    border-bottom:1px solid var(--line);
+  body{
+    padding-bottom:80px;min-height:100vh;
+    background:
+      radial-gradient(600px 300px at 15% -5%, rgba(59,45,240,.35), transparent 60%),
+      radial-gradient(500px 260px at 105% 10%, rgba(0,212,255,.18), transparent 60%),
+      var(--bg);
   }
-  .topbar .brand{font-size:13px;letter-spacing:.04em;color:var(--sub);margin-bottom:6px;}
-  .balance-row{display:flex;align-items:baseline;gap:8px;}
-  .balance-amt{font-size:34px;font-weight:700;color:var(--mint);}
-  .balance-refresh{margin-left:auto;background:none;border:1px solid var(--line);color:var(--sub);
-    border-radius:10px;padding:8px 10px;font-size:13px;}
 
-  .view{display:none;padding:18px 16px 8px;animation:fade .18s ease;}
+  .topbar{padding:26px 20px 18px;position:relative;}
+  .topbar .brand{
+    font-weight:800;font-size:19px;letter-spacing:-.01em;
+  }
+  .topbar .brand span{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;}
+  .balance-pill{
+    margin-top:16px;background:linear-gradient(135deg, rgba(124,92,255,.16), rgba(58,160,255,.10));
+    border:1px solid rgba(124,92,255,.35);border-radius:var(--radius);
+    padding:18px 20px;display:flex;align-items:center;
+  }
+  .balance-pill .lbl{font-size:12px;color:var(--sub);letter-spacing:.02em;margin-bottom:4px;}
+  .balance-pill .amt{font-size:30px;font-weight:800;}
+  .balance-pill button{
+    margin-left:auto;background:var(--grad);border:none;color:#fff;font-weight:700;
+    font-size:13px;border-radius:12px;padding:10px 16px;
+  }
+
+  .view{display:none;padding:8px 16px 8px;animation:fade .18s ease;}
   .view.active{display:block;}
   @keyframes fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
 
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
-    padding:18px;margin-bottom:14px;}
-  .card h2{margin:0 0 4px;font-size:16px;}
-  .card p.hint{margin:0 0 14px;color:var(--sub);font-size:13px;line-height:1.5;}
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:20px;margin-bottom:14px;position:relative;overflow:hidden;
+  }
+  .card::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(160deg, rgba(124,92,255,.06), transparent 40%);
+  }
+  .icon-badge{
+    width:46px;height:46px;border-radius:13px;display:flex;align-items:center;justify-content:center;
+    font-size:22px;margin-bottom:14px;
+    background:linear-gradient(135deg, rgba(124,92,255,.25), rgba(58,160,255,.18));
+    border:1px solid rgba(124,92,255,.35);
+  }
+  .card h2{margin:0 0 6px;font-size:17px;font-weight:800;letter-spacing:-.01em;}
+  .card p.hint{margin:0 0 14px;color:var(--sub);font-size:13.5px;line-height:1.55;}
 
-  .row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;
+  .row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;
     border-bottom:1px solid var(--line);}
   .row:last-child{border-bottom:none;}
   .row .k{color:var(--sub);font-size:13px;}
-  .row .v{font-weight:600;font-size:14px;}
+  .row .v{font-weight:700;font-size:14px;}
 
   input[type=text], input[type=password]{
     width:100%;background:var(--panel-2);border:1px solid var(--line);color:var(--text);
-    border-radius:10px;padding:13px 14px;font-size:15px;margin-bottom:10px;outline:none;
+    border-radius:12px;padding:14px 15px;font-size:15px;margin-bottom:10px;outline:none;
   }
-  input:focus{border-color:var(--mint-dim);}
+  input:focus{border-color:var(--violet);}
 
-  .btn{display:block;width:100%;text-align:center;border:none;border-radius:12px;
-    padding:14px;font-size:15px;font-weight:600;cursor:pointer;}
-  .btn-primary{background:var(--mint);color:#062017;}
-  .btn-primary:disabled{background:var(--mint-dim);opacity:.55;}
+  .btn{display:block;width:100%;text-align:center;border:none;border-radius:13px;
+    padding:15px;font-size:15px;font-weight:700;cursor:pointer;}
+  .btn-primary{background:var(--grad);color:#fff;box-shadow:0 8px 24px -8px rgba(124,92,255,.6);}
+  .btn-primary:disabled{opacity:.5;box-shadow:none;}
   .btn-outline{background:transparent;border:1px solid var(--line);color:var(--text);}
   .btn-danger{background:transparent;border:1px solid var(--danger);color:var(--danger);}
   .btn-row{display:flex;gap:10px;}
   .btn-row .btn{flex:1;}
 
   .method-pick{display:flex;gap:8px;margin-bottom:14px;}
-  .method-pick button{flex:1;padding:11px 4px;border-radius:10px;border:1px solid var(--line);
-    background:var(--panel-2);color:var(--sub);font-size:13px;font-weight:600;}
-  .method-pick button.active{border-color:var(--mint);color:var(--mint);background:rgba(43,227,168,.08);}
+  .method-pick button{flex:1;padding:12px 4px;border-radius:12px;border:1px solid var(--line);
+    background:var(--panel-2);color:var(--sub);font-size:13px;font-weight:700;}
+  .method-pick button.active{
+    border-color:transparent;color:#fff;background:var(--grad);
+  }
 
-  .task-box{background:var(--panel-2);border:1px dashed var(--line);border-radius:12px;padding:14px;margin-bottom:14px;}
-  .task-box .field{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:14px;}
-  .task-box code{background:#0a1310;padding:3px 7px;border-radius:6px;font-size:13px;}
-  .timer{color:var(--gold);font-weight:700;}
+  .task-box{
+    background:var(--panel-2);border:1px solid var(--line);border-radius:14px;
+    padding:16px;margin-bottom:14px;
+  }
+  .task-box .field{display:flex;justify-content:space-between;align-items:center;padding:7px 0;font-size:14px;}
+  .task-box code{background:#0a0d1a;padding:4px 8px;border-radius:7px;font-size:13px;color:#c9d0ff;}
+  .timer{color:var(--gold);font-weight:800;}
 
-  .empty{text-align:center;color:var(--sub);padding:34px 10px;font-size:14px;}
-  .empty .big{font-size:30px;display:block;margin-bottom:8px;}
+  .empty{text-align:center;color:var(--sub);padding:30px 10px 20px;font-size:14px;}
+  .empty .big{font-size:32px;display:block;margin-bottom:10px;}
+
+  .banner{
+    margin:0 16px 16px;padding:16px 18px;border-radius:16px;
+    background:var(--grad);color:#fff;font-weight:800;font-size:14px;
+    display:flex;align-items:center;gap:10px;box-shadow:0 10px 30px -10px rgba(124,92,255,.7);
+  }
 
   .toast{position:fixed;left:16px;right:16px;bottom:92px;background:var(--panel-2);
-    border:1px solid var(--line);border-radius:12px;padding:13px 16px;font-size:13.5px;
-    box-shadow:0 8px 24px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
+    border:1px solid var(--line);border-radius:13px;padding:13px 16px;font-size:13.5px;
+    box-shadow:0 8px 24px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
     transform:translateY(6px);z-index:50;}
   .toast.show{opacity:1;transform:translateY(0);}
-  .toast.err{border-color:var(--danger);color:#ffb3b3;}
-  .toast.ok{border-color:var(--mint-dim);color:var(--mint);}
+  .toast.err{border-color:var(--danger);color:#ffb3c2;}
+  .toast.ok{border-color:var(--violet);color:#c9bcff;}
 
-  nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--panel);
+  nav.tabs{position:fixed;left:0;right:0;bottom:0;background:rgba(18,22,42,.92);backdrop-filter:blur(10px);
     border-top:1px solid var(--line);display:flex;padding:8px 6px calc(8px + env(safe-area-inset-bottom));}
   nav.tabs button{flex:1;background:none;border:none;color:var(--sub);font-size:11.5px;
-    display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 2px;}
+    display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 2px;font-weight:600;}
   nav.tabs button .ic{font-size:20px;}
-  nav.tabs button.active{color:var(--mint);}
-
-  .skeleton{background:linear-gradient(90deg,var(--panel-2),#1c322a,var(--panel-2));
-    background-size:200% 100%;animation:shimmer 1.2s infinite;border-radius:8px;height:14px;}
-  @keyframes shimmer{0%{background-position:200% 0;}100%{background-position:-200% 0;}}
+  nav.tabs button.active{color:#fff;}
+  nav.tabs button.active .ic{filter:drop-shadow(0 0 8px rgba(124,92,255,.9));}
 </style>
 </head>
 <body>
 
 <div class="topbar">
-  <div class="brand">YOUR BALANCE</div>
-  <div class="balance-row">
-    <div class="balance-amt" id="balanceAmt">···</div>
-    <button class="balance-refresh" id="refreshBtn">↻ Refresh</button>
+  <div class="brand">GMAIL<span>EARNEX</span></div>
+  <div class="balance-pill">
+    <div>
+      <div class="lbl">YOUR BALANCE</div>
+      <div class="amt" id="balanceAmt">···</div>
+    </div>
+    <button id="refreshBtn">↻ Refresh</button>
   </div>
 </div>
 
 <!-- BALANCE / HOME -->
 <section class="view active" id="view-home">
+  <div class="banner" id="statusBanner" style="display:none;">
+    <span>⚠️</span><span id="statusMsg"></span>
+  </div>
   <div class="card">
-    <h2>Overview</h2>
-    <p class="hint">A quick snapshot of your account.</p>
+    <div class="icon-badge">📊</div>
+    <h2>Account Overview</h2>
+    <p class="hint">A quick snapshot of your earnings setup.</p>
     <div class="row"><div class="k">Min. withdrawal</div><div class="v" id="minWithdraw">—</div></div>
     <div class="row"><div class="k">Gmail sell rate</div><div class="v" id="sellRate">—</div></div>
     <div class="row"><div class="k">Selling Gmail</div><div class="v" id="sellEnabled">—</div></div>
-  </div>
-  <div class="card" id="statusCard" style="display:none;">
-    <h2 style="color:var(--danger)">Bot is Off</h2>
-    <p class="hint" id="statusMsg" style="color:#ffb3b3;"></p>
   </div>
 </section>
 
 <!-- TASKS -->
 <section class="view" id="view-tasks">
   <div class="card" id="taskCard">
+    <div class="icon-badge">🎯</div>
     <h2>Available Task</h2>
     <p class="hint">Grab a task, log into the given Gmail once, then submit for review.</p>
     <div id="taskArea"></div>
@@ -135,6 +174,7 @@
 <!-- SELL -->
 <section class="view" id="view-sell">
   <div class="card">
+    <div class="icon-badge">📨</div>
     <h2>Sell a Gmail</h2>
     <p class="hint">Send a Gmail you own. It goes to admin for review before you're paid <span id="sellRateInline"></span>.</p>
     <input type="text" id="sellUser" placeholder="example@gmail.com">
@@ -146,6 +186,7 @@
 <!-- WITHDRAW -->
 <section class="view" id="view-withdraw">
   <div class="card">
+    <div class="icon-badge">💸</div>
     <h2>Withdraw</h2>
     <p class="hint">Pick a method. Fee is deducted automatically from your balance.</p>
     <div class="method-pick">
@@ -224,12 +265,12 @@ async function loadMe(){
     document.getElementById('sellRateInline').textContent = '(' + data.sell_rate_display + ')';
     document.getElementById('ultraTab').style.display = data.ultra_enabled ? '' : 'none';
 
-    const statusCard = document.getElementById('statusCard');
+    const banner = document.getElementById('statusBanner');
     if (!data.bot_status){
-      statusCard.style.display = '';
+      banner.style.display = '';
       document.getElementById('statusMsg').textContent = data.bot_off_message || 'The bot is temporarily off. Please check back soon.';
     } else {
-      statusCard.style.display = 'none';
+      banner.style.display = 'none';
     }
 
     updateWithdrawFee();
