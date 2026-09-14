@@ -374,6 +374,7 @@ async def api_me(request: web.Request):
             "ultra": format_currency(ULTRA_FEES, curr)
         },
         "current_task": task_payload,
+        "single_task_status": SINGLE_TASK_STATUS,
         "bot_status": BOT_STATUS,
         "bot_off_message": None if BOT_STATUS else BOT_OFF_MESSAGE
     })
@@ -405,7 +406,9 @@ async def api_claim_task(request: web.Request):
         if existing:
             task_status = existing['status']
             if task_status == 'pending_review':
-                return json_error("Your task submission is under admin review. Please wait for approval.", 409)
+                if SINGLE_TASK_STATUS:
+                    return json_error("Your task submission is under admin review. Please wait for approval.", 409)
+                # SINGLE_TASK_STATUS is off (unlimited concurrent tasks) -> fall through and let the user claim another task.
             elif task_status == 'assigned':
                 expire_time = existing['assigned_at'] + timedelta(minutes=30)
                 if (expire_time - datetime.utcnow()).total_seconds() > 0:
@@ -720,6 +723,65 @@ async def api_withdraw(request: web.Request):
             invalidate_user_cache(user_id)
             return json_error(f"Ultra Gateway payment failed: {api_reason}. Your balance was not deducted.", 502)
 
+async def api_transactions(request: web.Request):
+    user = _get_authenticated_user(request)
+    if not user:
+        return json_error("Unauthorized. Please open this from inside the bot.", 401)
+    user_id = user['id']
+
+    if await is_banned(user_id):
+        return json_error("You are banned from using this bot.", 403)
+
+    await ensure_user(user_id)
+    user_data = await get_user_data(user_id)
+    curr = user_data['currency']
+
+    try:
+        limit = min(int(request.query.get('limit', 30)), 100)
+    except (TypeError, ValueError):
+        limit = 30
+
+    async with db_pool.acquire() as conn:
+        tx_rows = await conn.fetch('''
+            SELECT type, amount, note, created_at
+            FROM transactions
+            WHERE user_id=$1
+            ORDER BY id DESC
+            LIMIT $2
+        ''', user_id, limit)
+
+    items = []
+    for tx in tx_rows:
+        amt = tx['amount']
+        raw_type = (tx['type'] or 'general').lower()
+        if raw_type in ('withdrawal', 'withdrawal_paid'):
+            tx_type = 'Withdrawal'
+        elif raw_type == 'withdrawal_pending':
+            tx_type = 'Withdrawal Pending'
+        elif raw_type == 'withdrawal_rejected':
+            tx_type = 'Withdrawal Rejected'
+        elif raw_type == 'refund':
+            tx_type = 'Refund'
+        elif raw_type == 'task':
+            tx_type = 'Task Reward'
+        elif raw_type == 'sell':
+            tx_type = 'Gmail Sale'
+        elif raw_type == 'referral':
+            tx_type = 'Referral Bonus'
+        else:
+            tx_type = raw_type.replace('_', ' ').title()
+
+        items.append({
+            "type": tx_type,
+            "amount": amt,
+            "amount_display": format_currency(abs(amt), curr),
+            "positive": amt >= 0,
+            "note": tx['note'],
+            "created_at": tx['created_at'].isoformat() + "Z" if tx['created_at'] else None
+        })
+
+    return web.json_response({"ok": True, "transactions": items})
+
 def register_webapp_routes(app: web.Application):
     app.router.add_get('/api/me', api_me)
     app.router.add_post('/api/tasks/claim', api_claim_task)
@@ -727,6 +789,7 @@ def register_webapp_routes(app: web.Application):
     app.router.add_post('/api/tasks/cancel', api_cancel_task)
     app.router.add_post('/api/sell', api_sell_gmail)
     app.router.add_post('/api/withdraw', api_withdraw)
+    app.router.add_get('/api/transactions', api_transactions)
     webapp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'webapp')
     if os.path.isdir(webapp_dir):
         app.router.add_get('/webapp/', lambda r: web.FileResponse(os.path.join(webapp_dir, 'index.html')))
