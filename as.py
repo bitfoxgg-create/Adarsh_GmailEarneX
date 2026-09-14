@@ -7,6 +7,8 @@ import re
 import json
 import secrets
 import string
+import hashlib
+import hmac
 import aiohttp
 from aiohttp import web
 
@@ -23,7 +25,8 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     CopyTextButton,
-    ChatMemberUpdated
+    ChatMemberUpdated,
+    WebAppInfo
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
@@ -49,6 +52,7 @@ WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 WEBHOOK_SECRET = os.environ.get('WEBHOOK_SECRET', 'change_this_secret')
 _base_url = (os.environ.get('WEBHOOK_URL') or os.environ.get('RENDER_EXTERNAL_URL', '')).rstrip('/')
 WEBHOOK_URL = f"{_base_url}{WEBHOOK_PATH}" if _base_url else None
+WEBAPP_URL = f"{_base_url}/webapp/" if _base_url else None
 
 # Currency Conversion Rate (1 USD/USDT = 96.30 INR)
 USD_TO_INR = 96.30
@@ -253,6 +257,473 @@ async def is_gmail_registered(email: str, user_id: int = None) -> bool:
 
 async def health(request):
     return web.Response(text="Bot is running!")
+
+# ============================================
+# MINI APP (Telegram WebApp) JSON API
+# ============================================
+
+def validate_init_data(init_data: str, max_age_seconds: int = 86400):
+    """
+    Validates a Telegram WebApp `initData` string per Telegram's official algorithm:
+    https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
+    Returns the parsed `user` dict on success, or None if missing/invalid/expired.
+    """
+    if not init_data:
+        return None
+    try:
+        parsed = dict(urllib.parse.parse_qsl(init_data, strict_parsing=True))
+    except Exception:
+        return None
+
+    received_hash = parsed.pop('hash', None)
+    if not received_hash:
+        return None
+
+    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed.items()))
+    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+    computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+
+    if not hmac.compare_digest(computed_hash, received_hash):
+        return None
+
+    try:
+        auth_date = int(parsed.get('auth_date', 0))
+    except ValueError:
+        return None
+    if time.time() - auth_date > max_age_seconds:
+        return None
+
+    user_json = parsed.get('user')
+    if not user_json:
+        return None
+    try:
+        return json.loads(user_json)
+    except Exception:
+        return None
+
+def _get_authenticated_user(request: web.Request):
+    init_data = request.headers.get('X-Telegram-Init-Data') or request.query.get('initData')
+    return validate_init_data(init_data)
+
+def json_error(message: str, status: int = 400):
+    return web.json_response({"ok": False, "error": message}, status=status)
+
+async def api_me(request: web.Request):
+    user = _get_authenticated_user(request)
+    if not user:
+        return json_error("Unauthorized. Please open this from inside the bot.", 401)
+    user_id = user['id']
+
+    if await is_banned(user_id):
+        return json_error("You are banned from using this bot.", 403)
+
+    await ensure_user(user_id)
+    data = await get_user_data(user_id)
+    curr = data['currency']
+
+    async with db_pool.acquire() as conn:
+        current_task = await conn.fetchrow('''
+            SELECT t.id, t.title, t.details, t.reward, t.status, ta.assigned_at
+            FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id
+            WHERE ta.user_id=$1 ORDER BY ta.assigned_at DESC LIMIT 1
+        ''', user_id)
+
+    task_payload = None
+    if current_task and current_task['status'] in ('assigned', 'pending_review'):
+        try:
+            parts = current_task['details'].split(" | ")
+            email = parts[0].replace("Email: ", "").strip()
+            password = parts[1].replace("Pass: ", "").strip()
+        except Exception:
+            email = current_task['title'].replace("Login to ", "").strip()
+            password = "See Admin"
+        expire_at = None
+        if current_task['status'] == 'assigned':
+            expire_at = (current_task['assigned_at'] + timedelta(minutes=30)).isoformat() + "Z"
+        task_payload = {
+            "id": current_task['id'],
+            "email": email,
+            "password": password,
+            "reward_display": format_currency(current_task['reward'], curr),
+            "status": current_task['status'],
+            "expires_at": expire_at
+        }
+
+    return web.json_response({
+        "ok": True,
+        "user_id": user_id,
+        "currency": curr,
+        "balance_display": format_currency(data['balance'], curr),
+        "upi": data['upi'],
+        "usdt_address": data['usdt_address'],
+        "ultra_number": data['ultra_number'],
+        "min_withdrawal_display": format_currency(MIN_WITHDRAWAL_AMT, curr),
+        "sell_rate_display": format_currency(GMAIL_SELL_RATE, curr),
+        "sell_enabled": SELL_GMAIL_STATUS,
+        "ultra_enabled": ULTRA_STATUS,
+        "fees": {
+            "upi": format_currency(UPI_FEES, curr),
+            "usdt": format_currency(USDT_FEES, curr),
+            "ultra": format_currency(ULTRA_FEES, curr)
+        },
+        "current_task": task_payload,
+        "bot_status": BOT_STATUS,
+        "bot_off_message": None if BOT_STATUS else BOT_OFF_MESSAGE
+    })
+
+async def api_claim_task(request: web.Request):
+    user = _get_authenticated_user(request)
+    if not user:
+        return json_error("Unauthorized. Please open this from inside the bot.", 401)
+    user_id = user['id']
+
+    if not BOT_STATUS:
+        return json_error(BOT_OFF_MESSAGE, 503)
+    if await is_banned(user_id):
+        return json_error("You are banned from using this bot.", 403)
+    if not await check_user_joined_channel(user_id):
+        return json_error("Please join our channel first, then try again.", 403)
+
+    await ensure_user(user_id)
+    user_data = await get_user_data(user_id)
+    user_curr = user_data['currency']
+
+    async with db_pool.acquire() as conn:
+        existing = await conn.fetchrow('''
+            SELECT t.id, t.title, t.details, t.reward, t.status, a.assigned_at
+            FROM task_assignments a JOIN tasks t ON a.task_id = t.id
+            WHERE a.user_id=$1 ORDER BY a.assigned_at DESC LIMIT 1
+        ''', user_id)
+
+        if existing:
+            task_status = existing['status']
+            if task_status == 'pending_review':
+                return json_error("Your task submission is under admin review. Please wait for approval.", 409)
+            elif task_status == 'assigned':
+                expire_time = existing['assigned_at'] + timedelta(minutes=30)
+                if (expire_time - datetime.utcnow()).total_seconds() > 0:
+                    return json_error("You already have an active task. Refresh to see it.", 409)
+                else:
+                    async with conn.transaction():
+                        await conn.execute('DELETE FROM task_assignments WHERE user_id=$1 AND task_id=$2', user_id, existing['id'])
+                        await conn.execute('UPDATE tasks SET status=$1 WHERE id=$2', 'available', existing['id'])
+
+        task = await conn.fetchrow("SELECT id, title, details, reward FROM tasks WHERE status='available' ORDER BY RANDOM() LIMIT 1")
+        if not task:
+            return json_error("No tasks available right now.", 404)
+
+        task_id = task['id']
+        title = task['title']
+        details = task['details']
+        reward = task['reward']
+
+        try:
+            parts = details.split(" | ")
+            username = parts[0].replace("Email: ", "").strip()
+        except Exception:
+            username = title.replace("Login to ", "").strip()
+
+        password = DEFAULT_TASK_PASS if DEFAULT_TASK_PASS_STATUS else generate_random_password(12)
+        new_details = f"Email: {username} | Pass: {password}"
+
+        async with conn.transaction():
+            await conn.execute("UPDATE tasks SET status='assigned', details=$1 WHERE id=$2", new_details, task_id)
+            # message_id=0: this task card has no linked chat message since it was claimed via the Mini App.
+            await conn.execute('INSERT INTO task_assignments(task_id, user_id, message_id) VALUES ($1, $2, 0)', task_id, user_id)
+            await conn.execute('INSERT INTO task_history(task_id, user_id, password_used) VALUES ($1, $2, $3)', task_id, user_id, password)
+
+    return web.json_response({
+        "ok": True,
+        "task": {
+            "id": task_id,
+            "email": username,
+            "password": password,
+            "reward_display": format_currency(reward, user_curr),
+            "status": "assigned",
+            "expires_at": (datetime.utcnow() + timedelta(minutes=30)).isoformat() + "Z"
+        }
+    })
+
+async def api_submit_task(request: web.Request):
+    user = _get_authenticated_user(request)
+    if not user:
+        return json_error("Unauthorized. Please open this from inside the bot.", 401)
+    user_id = user['id']
+
+    async with db_pool.acquire() as conn:
+        task = await conn.fetchrow('''
+            SELECT t.id, t.title, t.details, t.reward
+            FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id
+            WHERE ta.user_id=$1 AND t.status = 'assigned'
+            ORDER BY ta.assigned_at DESC LIMIT 1
+        ''', user_id)
+
+    if not task:
+        return json_error("No active assigned task found to submit.", 404)
+
+    task_id = task['id']
+    title = task['title']
+    details = task['details']
+
+    try:
+        parts = details.split(" | ")
+        email = parts[0].replace("Email: ", "").strip()
+    except Exception:
+        email = title.replace("Login to ", "").strip()
+
+    is_valid = await is_gmail_registered(email, user_id=user_id)
+    if not is_valid:
+        return json_error(f"This Gmail account ({email}) does not exist on Google. Please create it first, then submit again.", 422)
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
+
+    admin_kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text='✅ Approve', callback_data=f'ta:{task_id}', style="success"),
+        InlineKeyboardButton(text='❌ Decline', callback_data=f'td:{task_id}', style="danger")
+    ]])
+    try:
+        await bot.send_message(
+            ADMIN_ID,
+            f"📥 <b>Task Submitted for Review (via Mini App)</b>\n\n🆔 #{task_id}\n📧 <code>{email}</code>\n👤 User: <code>{user_id}</code>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=admin_kb
+        )
+    except Exception:
+        pass
+
+    return web.json_response({"ok": True, "message": "Task submitted for admin review!"})
+
+async def api_cancel_task(request: web.Request):
+    user = _get_authenticated_user(request)
+    if not user:
+        return json_error("Unauthorized. Please open this from inside the bot.", 401)
+    user_id = user['id']
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT ta.task_id, t.status FROM task_assignments ta JOIN tasks t ON ta.task_id = t.id WHERE ta.user_id=$1 AND t.status != 'completed' ORDER BY ta.assigned_at DESC LIMIT 1",
+            user_id
+        )
+        if not row:
+            return json_error("You don't have any active task to cancel.", 404)
+        if row['status'] == 'pending_review':
+            return json_error("Cannot cancel a task already submitted for admin review.", 409)
+
+        task_id = row['task_id']
+        async with conn.transaction():
+            await conn.execute('DELETE FROM task_assignments WHERE user_id=$1 AND task_id=$2', user_id, task_id)
+            await conn.execute("UPDATE tasks SET status='available' WHERE id=$1", task_id)
+
+    return web.json_response({"ok": True, "message": f"Task #{task_id} cancelled and returned to the pool."})
+
+async def api_sell_gmail(request: web.Request):
+    user = _get_authenticated_user(request)
+    if not user:
+        return json_error("Unauthorized. Please open this from inside the bot.", 401)
+    user_id = user['id']
+
+    if not SELL_GMAIL_STATUS:
+        return json_error("Selling Gmail is currently disabled by admin.", 403)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return json_error("Invalid request body.")
+
+    username_input = (body.get('username') or '').strip()
+    password = (body.get('password') or '').strip()
+    if not username_input or not password:
+        return json_error("Username and password are required.")
+
+    if "@gmail.com" not in username_input.lower() and "@" not in username_input:
+        username = f"{username_input}@gmail.com"
+    else:
+        username = username_input
+
+    search_pattern = f"%{username.lower()}%"
+    async with db_pool.acquire() as conn:
+        existing_sell = await conn.fetchval("SELECT id FROM pending_sells WHERE LOWER(details) LIKE $1", search_pattern)
+        existing_task = await conn.fetchval("SELECT id FROM tasks WHERE LOWER(title) LIKE $1 OR LOWER(details) LIKE $1", search_pattern)
+
+    if existing_sell or existing_task:
+        return json_error("This email is already in the database. You cannot sell the same email twice.", 409)
+
+    is_valid = await is_gmail_registered(username, user_id=user_id)
+    if not is_valid:
+        return json_error(f"This Gmail account ({username}) does not exist on Google.", 422)
+
+    details = f"Username: {username}\nPassword: {password}"
+    async with db_pool.acquire() as conn:
+        sell_id = await conn.fetchval(
+            "INSERT INTO pending_sells (user_id, details, amount) VALUES ($1, $2, $3) RETURNING id",
+            user_id, details, GMAIL_SELL_RATE
+        )
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Approve", callback_data=f"sa:{sell_id}", style="success"),
+        InlineKeyboardButton(text="❌ Decline", callback_data=f"sd:{sell_id}", style="danger")
+    ]])
+    try:
+        await bot.send_message(
+            ADMIN_ID,
+            f"📨 <b>New Gmail Sell Request #{sell_id} (via Mini App)</b>\n\n👤 Seller: <code>{user_id}</code>\n📧 <code>{username}</code>",
+            parse_mode=ParseMode.HTML,
+            reply_markup=kb
+        )
+    except Exception:
+        pass
+
+    return web.json_response({"ok": True, "message": "Your Gmail was submitted for admin review!"})
+
+async def api_withdraw(request: web.Request):
+    user = _get_authenticated_user(request)
+    if not user:
+        return json_error("Unauthorized. Please open this from inside the bot.", 401)
+    user_id = user['id']
+
+    if not BOT_STATUS:
+        return json_error(BOT_OFF_MESSAGE, 503)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return json_error("Invalid request body.")
+
+    method = (body.get('method') or '').lower()
+    address = (body.get('address') or '').strip()
+    if method not in ('upi', 'usdt', 'ultra'):
+        return json_error("Invalid withdrawal method.")
+    if method == 'ultra' and not ULTRA_STATUS:
+        return json_error("Ultra Gateway is currently disabled.", 403)
+
+    user_data = await get_user_data(user_id)
+    bal = user_data['balance'] if user_data else 0.0
+    curr = user_data['currency'] if user_data else "USD"
+
+    column = {'upi': 'upi', 'usdt': 'usdt_address', 'ultra': 'ultra_number'}[method]
+    if address:
+        async with db_pool.acquire() as conn:
+            await conn.execute(f"UPDATE users SET {column}=$1 WHERE user_id=$2", address, user_id)
+        invalidate_user_cache(user_id)
+        user_data = await get_user_data(user_id)
+
+    saved_address = user_data.get(column)
+    if not saved_address or saved_address == "None":
+        return json_error(f"Please provide your {method.upper()} address to withdraw.", 400)
+
+    if bal < MIN_WITHDRAWAL_AMT:
+        return json_error(f"Minimum withdrawal is {format_currency(MIN_WITHDRAWAL_AMT, curr)}. Current balance: {format_currency(bal, curr)}", 400)
+
+    total_deducted = bal
+    fee = {'upi': UPI_FEES, 'usdt': USDT_FEES, 'ultra': ULTRA_FEES}[method]
+    payout_amount = bal - fee
+
+    if method in ('upi', 'usdt'):
+        method_label = 'UPI' if method == 'upi' else 'USDT BEP-20'
+        async with db_pool.acquire() as conn:
+            existing_pending = await conn.fetchrow("SELECT id FROM withdrawals WHERE user_id=$1 AND status='pending'", user_id)
+            if existing_pending:
+                return json_error("Your previous withdrawal is already pending.", 409)
+
+            withdraw_id = None
+            try:
+                async with conn.transaction():
+                    new_balance = await conn.fetchval(
+                        "UPDATE users SET balance = balance - $2 WHERE user_id=$1 AND balance >= $2 RETURNING balance",
+                        user_id, total_deducted
+                    )
+                    if new_balance is None:
+                        raise ValueError("balance_changed")
+                    withdraw_id = await conn.fetchval(
+                        "INSERT INTO withdrawals(user_id, amount, method, payment_address) VALUES ($1, $2, $3, $4) RETURNING id",
+                        user_id, payout_amount, method_label, saved_address
+                    )
+                    await conn.execute(
+                        "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
+                        user_id, "withdrawal_pending", -total_deducted,
+                        f"{method_label} Withdrawal #{withdraw_id} pending (Payout: {payout_amount:.2f}, Fee: {fee:.2f})"
+                    )
+            except asyncpg.exceptions.UniqueViolationError:
+                return json_error("Your previous withdrawal is already pending.", 409)
+            except ValueError:
+                return json_error("Your balance changed just now. Please try again.", 409)
+
+        invalidate_user_cache(user_id)
+        try:
+            await bot.send_message(
+                ADMIN_ID,
+                f"💸 <b>New Withdrawal Request (via Mini App)</b>\n\n🆔 #{withdraw_id}\n👤 <code>{user_id}</code>\n💳 {method_label}: <code>{saved_address}</code>\n💰 Payout: {format_currency(payout_amount, curr)}",
+                parse_mode=ParseMode.HTML
+            )
+        except Exception:
+            pass
+
+        return web.json_response({"ok": True, "message": f"Withdrawal request submitted! Payout: {format_currency(payout_amount, curr)}"})
+
+    else:
+        # Ultra Gateway: instant payout. Reserve the balance BEFORE calling the external API,
+        # refunding on failure - same pattern used by the in-chat handler.
+        async with db_pool.acquire() as conn:
+            new_balance = await conn.fetchval(
+                "UPDATE users SET balance = balance - $2 WHERE user_id=$1 AND balance >= $2 RETURNING balance",
+                user_id, total_deducted
+            )
+        if new_balance is None:
+            return json_error("Your balance changed just now. Please try again.", 409)
+        invalidate_user_cache(user_id)
+
+        url = f"https://ultra-pay.store/APIs/api?token={urllib.parse.quote(ULTRA_TOKEN)}&key={urllib.parse.quote(ULTRA_KEY)}&paytoNumber={urllib.parse.quote(saved_address)}&amount={payout_amount:.2f}&comment=iGmail Pay"
+
+        api_success = False
+        api_reason = "Unknown Error"
+        try:
+            session = HTTP_SESSION if HTTP_SESSION and not HTTP_SESSION.closed else aiohttp.ClientSession()
+            _own_session = session is not HTTP_SESSION
+            try:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15.0)) as resp:
+                    raw_text = await resp.text()
+                    try:
+                        res_data = json.loads(raw_text)
+                    except Exception:
+                        res_data = {}
+                    if resp.status == 200:
+                        status_val = str(res_data.get("status", "")).lower()
+                        if status_val in ["success", "true", "1", "ok"]:
+                            api_success = True
+                        else:
+                            api_reason = res_data.get("message") or res_data.get("msg") or raw_text
+                    else:
+                        api_reason = f"HTTP Error {resp.status}: {raw_text}"
+            finally:
+                if _own_session:
+                    await session.close()
+        except Exception as e:
+            api_reason = f"Connection error: {e}"
+
+        if api_success:
+            async with db_pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("INSERT INTO withdrawals(user_id, amount, method, payment_address, status) VALUES ($1, $2, 'Ultra Gateway', $3, 'paid')", user_id, payout_amount, saved_address)
+                    await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", user_id, "withdrawal", -total_deducted, "Ultra Gateway instant payout paid")
+            return web.json_response({"ok": True, "message": f"Instant payment successful! {format_currency(payout_amount, curr)} sent."})
+        else:
+            async with db_pool.acquire() as conn:
+                await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", total_deducted, user_id)
+            invalidate_user_cache(user_id)
+            return json_error(f"Ultra Gateway payment failed: {api_reason}. Your balance was not deducted.", 502)
+
+def register_webapp_routes(app: web.Application):
+    app.router.add_get('/api/me', api_me)
+    app.router.add_post('/api/tasks/claim', api_claim_task)
+    app.router.add_post('/api/tasks/submit', api_submit_task)
+    app.router.add_post('/api/tasks/cancel', api_cancel_task)
+    app.router.add_post('/api/sell', api_sell_gmail)
+    app.router.add_post('/api/withdraw', api_withdraw)
+    webapp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'webapp')
+    if os.path.isdir(webapp_dir):
+        app.router.add_get('/webapp/', lambda r: web.FileResponse(os.path.join(webapp_dir, 'index.html')))
+        app.router.add_static('/webapp/', webapp_dir, show_index=False)
 
 # ============================================
 # STATES
@@ -741,6 +1212,11 @@ def get_main_menu_keyboard():
         callback_data="menu_my_accounts",
         style="primary"
     )
+    if WEBAPP_URL:
+        kb.button(
+            text="🚀 Open Mini App",
+            web_app=WebAppInfo(url=WEBAPP_URL)
+        )
     kb.button(
         text="⚙️ Settings",
         callback_data="menu_settings"
@@ -756,9 +1232,9 @@ def get_main_menu_keyboard():
             url=HOWTO_VIDEO_LINK,
             style="primary"
         )
-        kb.adjust(2, 2, 2, 1, 2)
+        kb.adjust(2, 2, 2, 1, 1, 2) if WEBAPP_URL else kb.adjust(2, 2, 2, 1, 2)
     else:
-        kb.adjust(2, 2, 2, 1, 1)
+        kb.adjust(2, 2, 2, 1, 1, 1) if WEBAPP_URL else kb.adjust(2, 2, 2, 1, 1)
     return kb.as_markup()
 
 def get_add_task_type_keyboard():
@@ -3909,31 +4385,21 @@ def get_dustbin_item_keyboard(dustbin_id: int, page: int, total: int):
         nav_row.append(InlineKeyboardButton(text="Next ->", callback_data=f"dustbin_view:{page + 1}"))
     kb.row(*nav_row)
     kb.row(
-        InlineKeyboardButton(text="♻️ Restore", callback_data=f"dustbin_restore:{dustbin_id}", style="success"),
-        InlineKeyboardButton(text="🗑 Delete", callback_data=f"dustbin_delete:{dustbin_id}", style="danger"),
-        InlineKeyboardButton(text="✏️ Replace", callback_data=f"dustbin_replace:{dustbin_id}", style="primary")
+        InlineKeyboardButton(text="♻️ Restore", callback_data=f"dustbin_restore:{dustbin_id}:{page}", style="success"),
+        InlineKeyboardButton(text="🗑 Delete", callback_data=f"dustbin_delete:{dustbin_id}:{page}", style="danger"),
+        InlineKeyboardButton(text="✏️ Replace", callback_data=f"dustbin_replace:{dustbin_id}:{page}", style="primary")
     )
     kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back"))
     return kb.as_markup()
 
-@dp.callback_query(F.data.startswith("dustbin_view:"))
-async def cb_dustbin_view(call: CallbackQuery, state: FSMContext):
-    if call.from_user.id != ADMIN_ID:
-        return
-    await call.answer()
-    await state.clear()
-
-    page = int(call.data.split(":", 1)[1])
-
+async def render_dustbin_page(page: int):
+    """Returns (text, keyboard) for a single dustbin item at the given page, or an
+    'empty' message if the dustbin has nothing left. Shared by view/restore/delete/replace
+    so that acting on one item can jump straight to showing the next one."""
     async with db_pool.acquire() as conn:
         total = await conn.fetchval("SELECT COUNT(*) FROM dustbin_tasks")
         if total == 0:
-            try:
-                await call.message.edit_text("📭 <b>Dustbin is empty.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_dustbin_menu"))
-            except TelegramBadRequest as e:
-                if "message is not modified" not in str(e):
-                    await call.message.answer("📭 <b>Dustbin is empty.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_dustbin_menu"))
-            return
+            return "📭 <b>Dustbin is empty.</b>", get_back_inline_keyboard("back_dustbin_menu")
 
         page = max(1, min(page, total))
         row = await conn.fetchrow(
@@ -3943,6 +4409,17 @@ async def cb_dustbin_view(call: CallbackQuery, state: FSMContext):
 
     text = format_dustbin_item_text(row, page, total)
     kb = get_dustbin_item_keyboard(row['id'], page, total)
+    return text, kb
+
+@dp.callback_query(F.data.startswith("dustbin_view:"))
+async def cb_dustbin_view(call: CallbackQuery, state: FSMContext):
+    if call.from_user.id != ADMIN_ID:
+        return
+    await call.answer()
+    await state.clear()
+
+    page = int(call.data.split(":", 1)[1])
+    text, kb = await render_dustbin_page(page)
 
     try:
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -3954,7 +4431,9 @@ async def cb_dustbin_view(call: CallbackQuery, state: FSMContext):
 async def cb_dustbin_restore(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
-    dustbin_id = int(call.data.split(":", 1)[1])
+    parts = call.data.split(":")
+    dustbin_id = int(parts[1])
+    page = int(parts[2]) if len(parts) > 2 else 1
 
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT title, details, reward, added_by FROM dustbin_tasks WHERE id=$1", dustbin_id)
@@ -3969,9 +4448,14 @@ async def cb_dustbin_restore(call: CallbackQuery):
             )
             await conn.execute("DELETE FROM dustbin_tasks WHERE id=$1", dustbin_id)
 
-    await call.answer("♻️ Task restored to the pool!", show_alert=True)
+    await call.answer("♻️ Task restored to the pool!")
+
+    text, kb = await render_dustbin_page(page)
     try:
-        await call.message.edit_text("♻️ <b>Task has been restored to the available pool.</b>", parse_mode=ParseMode.HTML, reply_markup=get_back_inline_keyboard("back_dustbin_menu"))
+        await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            await call.message.answer(text, parse_mode=ParseMode.HTML, reply_markup=kb)
     except Exception:
         pass
 
@@ -6413,6 +6897,7 @@ async def main():
         # FAST PATH: Telegram pushes updates to us directly - removes the getUpdates round-trip
         app = web.Application()
         app.router.add_get('/', health)
+        register_webapp_routes(app)
         SimpleRequestHandler(
             dispatcher=dp,
             bot=bot,
@@ -6433,6 +6918,7 @@ async def main():
         # FALLBACK: WEBHOOK_URL not set -> behaves exactly like the original long-polling bot
         app = web.Application()
         app.router.add_get('/', health)
+        register_webapp_routes(app)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, host='0.0.0.0', port=port)
