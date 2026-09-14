@@ -220,6 +220,18 @@
   .hist-row .hist-amt.pos{color:#4ade80;}
   .hist-row .hist-amt.neg{color:var(--danger);}
 
+  .hist-pagination{display:flex;align-items:center;justify-content:center;gap:16px;
+    margin-top:8px;padding-top:14px;border-top:1px solid var(--line);}
+  .hist-pagination button{width:36px;height:36px;border-radius:11px;border:1px solid var(--line);
+    background:var(--panel-2);color:var(--text);display:flex;align-items:center;justify-content:center;
+    cursor:pointer;transition:transform .18s cubic-bezier(.34,1.56,.64,1), opacity .15s ease, border-color .15s ease;}
+  .hist-pagination button .icon{width:17px;height:17px;stroke-width:2.4;}
+  .hist-pagination button:active{transform:scale(.88);}
+  .hist-pagination button:disabled{opacity:.3;cursor:default;}
+  .hist-pagination button:disabled:active{transform:none;}
+  .hist-pagination .hist-page-label{font-size:12.5px;font-weight:800;color:var(--sub);
+    min-width:64px;text-align:center;font-variant-numeric:tabular-nums;}
+
   .closed-notice{display:flex;gap:12px;align-items:flex-start;background:rgba(255,93,122,.08);
     border:1px solid rgba(255,93,122,.35);border-radius:14px;padding:14px 16px;}
   .closed-notice .icon{width:22px;height:22px;color:var(--danger);margin-top:2px;stroke-width:2;}
@@ -279,6 +291,8 @@
 <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v11.5"/><path d="m7 10.5 5 5 5-5"/><path d="M5 19.5h14"/></symbol>
 <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 12.5h4.3l1.7 2.5h4l1.7-2.5H20"/><path d="M6.3 4.5h11.4l2 8v6a2 2 0 0 1-2 2H6.3a2 2 0 0 1-2-2v-6l2-8Z"/></symbol>
 <symbol id="i-card" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.2"/><line x1="3" y1="10" x2="21" y2="10"/></symbol>
+<symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M15 5 8 12l7 7"/></symbol>
+<symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
 </defs>
 </svg>
 
@@ -508,7 +522,7 @@ function switchView(name){
   document.getElementById('view-' + name).classList.add('active');
   document.querySelectorAll('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === name));
   if (name === 'tasks') renderTask();
-  if (name === 'withdraw') loadHistory();
+  if (name === 'withdraw') loadHistory(1);
 }
 
 function escapeHtml(str){
@@ -523,16 +537,23 @@ function fmtHistDate(iso){
     d.toLocaleTimeString(undefined, {hour:'2-digit', minute:'2-digit'});
 }
 
-async function loadHistory(){
+let historyPage = 1;
+
+async function loadHistory(page){
+  if (page) historyPage = page;
   const list = document.getElementById('historyList');
   try{
-    const data = await api('/api/transactions?limit=30');
+    const data = await api(`/api/transactions?page=${historyPage}&page_size=10`);
     const items = data.transactions || [];
+    historyPage = data.page || historyPage;
+    const totalPages = data.total_pages || 1;
+
     if (!items.length){
       list.innerHTML = `<div class="empty"><svg class="icon"><use href="#i-inbox"></use></svg>No balance history yet.</div>`;
       return;
     }
-    list.innerHTML = items.map(tx => {
+
+    const rowsHtml = items.map(tx => {
       const sign = tx.positive ? '+' : '-';
       const cls = tx.positive ? 'pos' : 'neg';
       const iconId = tx.positive ? 'i-check-circle' : 'i-wallet';
@@ -548,6 +569,18 @@ async function loadHistory(){
           <div class="hist-amt ${cls}">${sign}${tx.amount_display}</div>
         </div>`;
     }).join('');
+
+    const paginationHtml = totalPages > 1 ? `
+      <div class="hist-pagination">
+        <button id="histPrevBtn" ${historyPage <= 1 ? 'disabled' : ''}><svg class="icon"><use href="#i-chevron-left"></use></svg></button>
+        <span class="hist-page-label">Page ${historyPage} / ${totalPages}</span>
+        <button id="histNextBtn" ${historyPage >= totalPages ? 'disabled' : ''}><svg class="icon"><use href="#i-chevron-right"></use></svg></button>
+      </div>` : '';
+
+    list.innerHTML = rowsHtml + paginationHtml;
+
+    if (historyPage > 1) document.getElementById('histPrevBtn').onclick = () => { sndTap(); loadHistory(historyPage - 1); };
+    if (historyPage < totalPages) document.getElementById('histNextBtn').onclick = () => { sndTap(); loadHistory(historyPage + 1); };
   } catch(e){
     list.innerHTML = `<div class="empty"><svg class="icon"><use href="#i-alert-circle"></use></svg>${e.message}</div>`;
   }
@@ -558,6 +591,7 @@ document.querySelectorAll('nav.tabs button').forEach(btn=>{
 });
 
 let lastBalanceValue = null;
+let forceCountFromZero = false;
 function animateBalanceTo(newDisplayStr){
   const amtEl = document.getElementById('balanceAmt');
   const match = newDisplayStr.match(/^([^\d]*)([\d,]+(?:\.\d+)?)/);
@@ -565,8 +599,9 @@ function animateBalanceTo(newDisplayStr){
 
   const prefix = match[1];
   const toVal = parseFloat(match[2].replace(/,/g, ''));
-  const fromVal = (lastBalanceValue === null) ? toVal : lastBalanceValue;
+  const fromVal = forceCountFromZero ? 0 : ((lastBalanceValue === null) ? toVal : lastBalanceValue);
   lastBalanceValue = toVal;
+  forceCountFromZero = false;
 
   if (fromVal === toVal){
     amtEl.textContent = newDisplayStr;
@@ -767,6 +802,7 @@ document.getElementById('refreshBtn').addEventListener('click', async ()=>{
   sndRefresh();
   const icon = document.querySelector('#refreshBtn .icon');
   icon.classList.add('spin');
+  forceCountFromZero = true;
   await loadMe();
   icon.classList.remove('spin');
 });
