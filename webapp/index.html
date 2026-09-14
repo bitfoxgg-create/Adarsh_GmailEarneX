@@ -269,12 +269,49 @@ const initData = tg ? tg.initData : "";
 let STATE = null;
 let currentMethod = "upi";
 
+// ---- Lightweight sound effects (synthesized, no audio files needed) ----
+let audioCtx = null;
+function getAudioCtx(){
+  if (!audioCtx){
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e){ audioCtx = null; }
+  }
+  if (audioCtx && audioCtx.state === 'suspended'){
+    audioCtx.resume().catch(()=>{});
+  }
+  return audioCtx;
+}
+function playTone(freqs, step, waveType){
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const now = ctx.currentTime;
+  freqs.forEach((f, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = waveType || 'sine';
+    osc.frequency.value = f;
+    const t0 = now + i * step;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.2, t0 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + step);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + step + 0.02);
+  });
+}
+function sndSuccess(){ playTone([660, 990], 0.11, 'sine'); }        // task claimed, withdrawal requested, sell submitted, etc.
+function sndError(){ playTone([220, 160], 0.14, 'sine'); }          // any failure toast
+function sndRefresh(){ playTone([500], 0.09, 'triangle'); }         // manual refresh
+function sndTap(){ playTone([880], 0.05, 'square'); }               // tab switch
+
 function toast(msg, type){
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'toast show ' + (type || '');
   clearTimeout(toast._h);
   toast._h = setTimeout(()=> t.classList.remove('show'), 3200);
+  if (type === 'ok') sndSuccess();
+  else if (type === 'err') sndError();
 }
 
 async function api(path, opts){
@@ -301,7 +338,7 @@ function switchView(name){
 }
 
 document.querySelectorAll('nav.tabs button').forEach(btn=>{
-  btn.addEventListener('click', ()=> switchView(btn.dataset.view));
+  btn.addEventListener('click', ()=> { sndTap(); switchView(btn.dataset.view); });
 });
 
 async function loadMe(){
@@ -471,7 +508,7 @@ document.getElementById('withdrawBtn').addEventListener('click', async ()=>{
   finally{ btn.disabled = false; btn.textContent = 'Request Withdrawal'; }
 });
 
-document.getElementById('refreshBtn').addEventListener('click', loadMe);
+document.getElementById('refreshBtn').addEventListener('click', ()=> { sndRefresh(); loadMe(); });
 
 loadMe();
 </script>
