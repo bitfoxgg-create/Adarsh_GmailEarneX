@@ -25,12 +25,26 @@
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
   html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
-  body{
-    padding-bottom:80px;min-height:100vh;
-    background:
-      radial-gradient(600px 300px at 15% -5%, rgba(59,45,240,.35), transparent 60%),
-      radial-gradient(500px 260px at 105% 10%, rgba(0,212,255,.18), transparent 60%),
-      var(--bg);
+  body{padding-bottom:80px;min-height:100vh;position:relative;overflow-x:hidden;}
+
+  .bg-glow{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;}
+  .bg-glow span{position:absolute;border-radius:50%;filter:blur(60px);opacity:.5;}
+  .bg-glow span.g1{width:340px;height:340px;top:-120px;left:-80px;
+    background:radial-gradient(circle, var(--bg-glow-1), transparent 70%);
+    animation:float1 14s ease-in-out infinite;}
+  .bg-glow span.g2{width:300px;height:300px;top:10%;right:-100px;
+    background:radial-gradient(circle, var(--bg-glow-2), transparent 70%);
+    animation:float2 17s ease-in-out infinite;}
+  .bg-glow span.g3{width:260px;height:260px;bottom:60px;left:20%;
+    background:radial-gradient(circle, #ff5db3, transparent 70%);
+    opacity:.28;animation:float1 20s ease-in-out infinite reverse;}
+  @keyframes float1{
+    0%,100%{transform:translate(0,0) scale(1);}
+    50%{transform:translate(40px,60px) scale(1.15);}
+  }
+  @keyframes float2{
+    0%,100%{transform:translate(0,0) scale(1);}
+    50%{transform:translate(-50px,40px) scale(1.1);}
   }
 
   .topbar{padding:26px 20px 18px;position:relative;}
@@ -41,10 +55,26 @@
   .balance-pill{
     margin-top:16px;background:linear-gradient(135deg, rgba(124,92,255,.16), rgba(58,160,255,.10));
     border:1px solid rgba(124,92,255,.35);border-radius:var(--radius);
-    padding:18px 20px;display:flex;align-items:center;
+    padding:18px 20px;display:flex;align-items:center;position:relative;overflow:hidden;
+  }
+  .balance-pill::after{
+    content:"";position:absolute;top:0;bottom:0;width:60%;
+    background:linear-gradient(100deg, transparent, rgba(255,255,255,.10), transparent);
+    transform:translateX(-150%);animation:sheen 4.5s ease-in-out infinite;
+  }
+  @keyframes sheen{
+    0%{transform:translateX(-150%);}
+    35%{transform:translateX(250%);}
+    100%{transform:translateX(250%);}
   }
   .balance-pill .lbl{font-size:12px;color:var(--sub);letter-spacing:.02em;margin-bottom:4px;}
-  .balance-pill .amt{font-size:30px;font-weight:800;}
+  .balance-pill .amt{font-size:30px;font-weight:800;display:inline-block;}
+  .balance-pill .amt.pop{animation:popIn .35s ease;}
+  @keyframes popIn{
+    0%{transform:scale(.85);opacity:.4;}
+    60%{transform:scale(1.05);opacity:1;}
+    100%{transform:scale(1);}
+  }
   .balance-pill button{
     margin-left:auto;background:var(--grad);border:none;color:#fff;font-weight:700;
     font-size:13px;border-radius:12px;padding:10px 16px;
@@ -67,6 +97,11 @@
     font-size:22px;margin-bottom:14px;
     background:linear-gradient(135deg, rgba(124,92,255,.25), rgba(58,160,255,.18));
     border:1px solid rgba(124,92,255,.35);
+    animation:badgePulse 3s ease-in-out infinite;
+  }
+  @keyframes badgePulse{
+    0%,100%{box-shadow:0 0 0 0 rgba(124,92,255,.35);}
+    50%{box-shadow:0 0 0 8px rgba(124,92,255,0);}
   }
   .card h2{margin:0 0 6px;font-size:17px;font-weight:800;letter-spacing:-.01em;}
   .card p.hint{margin:0 0 14px;color:var(--sub);font-size:13.5px;line-height:1.55;}
@@ -84,7 +119,9 @@
   input:focus{border-color:var(--violet);}
 
   .btn{display:block;width:100%;text-align:center;border:none;border-radius:13px;
-    padding:15px;font-size:15px;font-weight:700;cursor:pointer;}
+    padding:15px;font-size:15px;font-weight:700;cursor:pointer;
+    transition:transform .12s ease, box-shadow .12s ease;}
+  .btn:active{transform:scale(.96);}
   .btn-primary{background:var(--grad);color:#fff;box-shadow:0 8px 24px -8px rgba(124,92,255,.6);}
   .btn-primary:disabled{opacity:.5;box-shadow:none;}
   .btn-outline{background:transparent;border:1px solid var(--line);color:var(--text);}
@@ -94,10 +131,18 @@
 
   .method-pick{display:flex;gap:8px;margin-bottom:14px;}
   .method-pick button{flex:1;padding:12px 4px;border-radius:12px;border:1px solid var(--line);
-    background:var(--panel-2);color:var(--sub);font-size:13px;font-weight:700;}
+    background:var(--panel-2);color:var(--sub);font-size:13px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;gap:6px;
+    transition:transform .12s ease, border-color .15s ease;}
+  .method-pick button:active{transform:scale(.95);}
   .method-pick button.active{
     border-color:transparent;color:#fff;background:var(--grad);
   }
+  .pay-logo{width:18px;height:18px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;
+    border-radius:5px;font-size:10px;font-weight:800;color:#fff;}
+  .pay-logo.upi{background:linear-gradient(135deg,#ff7a1a,#6739b7);}
+  .pay-logo.usdt{background:#26a17b;}
+  .pay-logo.ultra{background:linear-gradient(135deg,#7c5cff,#3aa0ff);font-size:11px;}
 
   .task-box{
     background:var(--panel-2);border:1px solid var(--line);border-radius:14px;
@@ -134,6 +179,8 @@
 </style>
 </head>
 <body>
+<div class="bg-glow"><span class="g1"></span><span class="g2"></span><span class="g3"></span></div>
+
 
 <div class="topbar">
   <div class="brand">GMAIL<span>EARNEX</span></div>
@@ -153,7 +200,7 @@
   </div>
   <div class="card">
     <div class="icon-badge">📊</div>
-    <h2>Account Overview</h2>
+    <h2>Your Stats</h2>
     <p class="hint">A quick snapshot of your earnings setup.</p>
     <div class="row"><div class="k">Min. withdrawal</div><div class="v" id="minWithdraw">—</div></div>
     <div class="row"><div class="k">Gmail sell rate</div><div class="v" id="sellRate">—</div></div>
@@ -190,9 +237,9 @@
     <h2>Withdraw</h2>
     <p class="hint">Pick a method. Fee is deducted automatically from your balance.</p>
     <div class="method-pick">
-      <button data-m="upi" class="active">UPI</button>
-      <button data-m="usdt">USDT</button>
-      <button data-m="ultra" id="ultraTab">Ultra</button>
+      <button data-m="upi" class="active"><span class="pay-logo upi">UPI</span>UPI</button>
+      <button data-m="usdt"><span class="pay-logo usdt">₮</span>USDT</button>
+      <button data-m="ultra" id="ultraTab"><span class="pay-logo ultra">⚡</span>Ultra</button>
     </div>
     <input type="text" id="wAddress" placeholder="Enter your UPI ID">
     <div class="row"><div class="k">Fee</div><div class="v" id="wFee">—</div></div>
@@ -204,7 +251,7 @@
 <div class="toast" id="toast"></div>
 
 <nav class="tabs">
-  <button data-view="home" class="active"><span class="ic">🏠</span>Balance</button>
+  <button data-view="home" class="active"><span class="ic">📈</span>Stats</button>
   <button data-view="tasks"><span class="ic">🎯</span>Tasks</button>
   <button data-view="sell"><span class="ic">📨</span>Sell</button>
   <button data-view="withdraw"><span class="ic">💸</span>Withdraw</button>
@@ -258,7 +305,11 @@ async function loadMe(){
   try{
     const data = await api('/api/me');
     STATE = data;
-    document.getElementById('balanceAmt').textContent = data.balance_display;
+    const amtEl = document.getElementById('balanceAmt');
+    amtEl.textContent = data.balance_display;
+    amtEl.classList.remove('pop');
+    void amtEl.offsetWidth;
+    amtEl.classList.add('pop');
     document.getElementById('minWithdraw').textContent = data.min_withdrawal_display;
     document.getElementById('sellRate').textContent = data.sell_rate_display;
     document.getElementById('sellEnabled').textContent = data.sell_enabled ? 'Open' : 'Paused';
