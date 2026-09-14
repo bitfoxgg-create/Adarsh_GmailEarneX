@@ -77,8 +77,10 @@
   }
   .balance-pill button{
     margin-left:auto;background:var(--grad);border:none;color:#fff;font-weight:700;
-    font-size:13px;border-radius:12px;padding:10px 16px;
+    font-size:13px;border-radius:12px;padding:10px 16px;cursor:pointer;
+    transition:transform .15s cubic-bezier(.34,1.56,.64,1), opacity .15s ease;
   }
+  .balance-pill button:active{transform:scale(.92);opacity:.85;}
 
   .view{display:none;padding:8px 16px 8px;animation:fade .18s ease;}
   .view.active{display:block;}
@@ -120,7 +122,7 @@
 
   .btn{display:block;width:100%;text-align:center;border:none;border-radius:13px;
     padding:15px;font-size:15px;font-weight:700;cursor:pointer;
-    transition:transform .12s ease, box-shadow .12s ease;}
+    transition:transform .18s cubic-bezier(.34,1.56,.64,1), box-shadow .18s ease, opacity .18s ease;}
   .btn:active{transform:scale(.96);}
   .btn-primary{background:var(--grad);color:#fff;box-shadow:0 8px 24px -8px rgba(124,92,255,.6);}
   .btn-primary:disabled{opacity:.5;box-shadow:none;}
@@ -131,10 +133,10 @@
 
   .method-pick{display:flex;gap:8px;margin-bottom:14px;}
   .method-pick button{flex:1;padding:12px 4px;border-radius:12px;border:1px solid var(--line);
-    background:var(--panel-2);color:var(--sub);font-size:13px;font-weight:700;
+    background:var(--panel-2);color:var(--sub);font-size:13px;font-weight:700;cursor:pointer;
     display:flex;align-items:center;justify-content:center;gap:6px;
-    transition:transform .12s ease, border-color .15s ease;}
-  .method-pick button:active{transform:scale(.95);}
+    transition:transform .18s cubic-bezier(.34,1.56,.64,1), border-color .18s ease, background .18s ease, color .18s ease;}
+  .method-pick button:active{transform:scale(.94);}
   .method-pick button.active{
     border-color:transparent;color:#fff;background:var(--grad);
   }
@@ -175,9 +177,11 @@
 
   nav.tabs{position:fixed;left:0;right:0;bottom:0;background:rgba(18,22,42,.92);backdrop-filter:blur(10px);
     border-top:1px solid var(--line);display:flex;padding:8px 6px calc(8px + env(safe-area-inset-bottom));}
-  nav.tabs button{flex:1;background:none;border:none;color:var(--sub);font-size:11.5px;
-    display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 2px;font-weight:600;}
-  nav.tabs button .ic{font-size:20px;}
+  nav.tabs button{flex:1;background:none;border:none;color:var(--sub);font-size:11.5px;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 2px;font-weight:600;
+    transition:transform .15s cubic-bezier(.34,1.56,.64,1), color .18s ease;}
+  nav.tabs button:active{transform:scale(.88);}
+  nav.tabs button .ic{font-size:20px;transition:filter .18s ease;}
   nav.tabs button.active{color:#fff;}
   nav.tabs button.active .ic{filter:drop-shadow(0 0 8px rgba(124,92,255,.9));}
 </style>
@@ -341,16 +345,41 @@ document.querySelectorAll('nav.tabs button').forEach(btn=>{
   btn.addEventListener('click', ()=> { sndTap(); switchView(btn.dataset.view); });
 });
 
+let lastBalanceValue = null;
+function animateBalanceTo(newDisplayStr){
+  const amtEl = document.getElementById('balanceAmt');
+  const match = newDisplayStr.match(/^([^\d]*)([\d,]+(?:\.\d+)?)/);
+  if (!match){ amtEl.textContent = newDisplayStr; return; }
+
+  const prefix = match[1];
+  const toVal = parseFloat(match[2].replace(/,/g, ''));
+  const fromVal = (lastBalanceValue === null) ? toVal : lastBalanceValue;
+  lastBalanceValue = toVal;
+
+  if (fromVal === toVal){
+    amtEl.textContent = newDisplayStr;
+    return;
+  }
+
+  const duration = 700;
+  const start = performance.now();
+
+  function tick(now){
+    const p = Math.min(1, (now - start) / duration);
+    const eased = 1 - Math.pow(1 - p, 3); // ease-out cubic
+    const current = fromVal + (toVal - fromVal) * eased;
+    amtEl.textContent = prefix + current.toFixed(2);
+    if (p < 1) requestAnimationFrame(tick);
+    else amtEl.textContent = newDisplayStr;
+  }
+  requestAnimationFrame(tick);
+}
+
 async function loadMe(){
-  document.getElementById('balanceAmt').textContent = '···';
   try{
     const data = await api('/api/me');
     STATE = data;
-    const amtEl = document.getElementById('balanceAmt');
-    amtEl.textContent = data.balance_display;
-    amtEl.classList.remove('pop');
-    void amtEl.offsetWidth;
-    amtEl.classList.add('pop');
+    animateBalanceTo(data.balance_display);
     document.getElementById('totalEarning').textContent = data.total_earning_display;
     document.getElementById('taskRate').textContent = data.task_rate_display;
     document.getElementById('sellRateHome').textContent = data.sell_rate_display + ' · ' + (data.sell_enabled ? 'Open' : 'Closed');
