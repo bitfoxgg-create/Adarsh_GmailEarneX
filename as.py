@@ -4635,9 +4635,9 @@ async def process_dustbin_replace(message: Message, state: FSMContext):
 
 def get_videos_menu_keyboard():
     kb = InlineKeyboardBuilder()
-    task_status = "<tg-emoji emoji-id=\"5416081784641168838\">🟢</tg-emoji> Set" if TASK_VIDEO_LINK else "<tg-emoji emoji-id=\"5411225014148014586\">🔴</tg-emoji> Not Set"
-    sell_status = "<tg-emoji emoji-id=\"5416081784641168838\">🟢</tg-emoji> Set" if SELL_VIDEO_LINK else "<tg-emoji emoji-id=\"5411225014148014586\">🔴</tg-emoji> Not Set"
-    howto_status = "<tg-emoji emoji-id=\"5416081784641168838\">🟢</tg-emoji> Set" if HOWTO_VIDEO_LINK else "<tg-emoji emoji-id=\"5411225014148014586\">🔴</tg-emoji> Not Set"
+    task_status = "🟢 Set" if TASK_VIDEO_LINK else "🔴 Not Set"
+    sell_status = "🟢 Set" if SELL_VIDEO_LINK else "🔴 Not Set"
+    howto_status = "🟢 Set" if HOWTO_VIDEO_LINK else "🔴 Not Set"
     kb.button(text=f"Tasks Video: {task_status}", icon_custom_emoji_id="5197269100878907942", callback_data="video_set:tasks", style="primary")
     kb.button(text=f"Sell Video: {sell_status}", icon_custom_emoji_id="5377548235709619284", callback_data="video_set:sell", style="primary")
     kb.button(text=f"How To Use Bot Video: {howto_status}", icon_custom_emoji_id="5436113877181941026", callback_data="video_set:howto", style="primary")
