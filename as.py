@@ -3052,8 +3052,11 @@ async def render_workers_list_text_and_kb():
     kb = InlineKeyboardBuilder()
 
     for idx, w in enumerate(workers, start=1):
-        status_icon = "<tg-emoji emoji-id=\"5416081784641168838\">🟢</tg-emoji>" if w['is_active'] else "<tg-emoji emoji-id=\"5411225014148014586\">🔴</tg-emoji>"
-        sell_icon = "<tg-emoji emoji-id=\"5377548235709619284\">📨</tg-emoji>" if w['can_sell_gmail'] else "<tg-emoji emoji-id=\"5240241223632954241\">🚫</tg-emoji>"
+        # NOTE: inline button labels never parse HTML/entities (no parse_mode applies to
+        # button text), so custom-emoji <tg-emoji> tags must NOT be used here - only plain
+        # unicode emoji render correctly inside a button.
+        status_icon = "🟢" if w['is_active'] else "🔴"
+        sell_icon = "📨" if w['can_sell_gmail'] else "🚫"
         worker_display_name = w['name'] if w['name'] else f"Worker ({w['worker_id']})"
         btn_label = f"#{idx} {worker_display_name} {status_icon}{sell_icon}"
         kb.button(text=btn_label, callback_data=f"adm_work_view:{w['worker_id']}")
@@ -4126,9 +4129,9 @@ async def process_chat_message_step(message: Message, state: FSMContext):
             from_chat_id=message.chat.id,
             message_id=message.message_id
         )
-        await message.answer(f"✅ **Message successfully sent to User `{target_user_id}`!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        await message.answer(f"<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> **Message successfully sent to User `{target_user_id}`!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
     except Exception as e:
-        await message.answer(f"❌ Failed to send message to User `{target_user_id}`.\n\nError: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        await message.answer(f"<tg-emoji emoji-id=\"5274099962655816924\">❌</tg-emoji> Failed to send message to User `{target_user_id}`.\n\nError: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
 
     await state.clear()
 
@@ -4161,7 +4164,7 @@ async def start_unassign_user_id(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID:
         return
     await state.set_state(AdminState.waiting_for_unassign_user_id)
-    await call.message.answer("👤 Send the numeric **User ID** whose task you want to unassign:", parse_mode=ParseMode.MARKDOWN)
+    await call.message.answer("<tg-emoji emoji-id=\"5870458774455587120\">👤</tg-emoji> Send the numeric **User ID** whose task you want to unassign:", parse_mode=ParseMode.MARKDOWN)
 
 @dp.callback_query(F.data == "unassign_all_users")
 async def start_unassign_all_users(call: CallbackQuery, state: FSMContext):
@@ -4238,7 +4241,7 @@ async def process_unassign_user_id_step(message: Message, state: FSMContext):
                 WHERE ta.user_id=$1
             ''', target_id)
             if not assigned:
-                await message.answer(f"📭 User `{target_id}` does not have any active task assigned.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+                await message.answer(f"<tg-emoji emoji-id=\"5262831879731555779\">📭</tg-emoji> User `{target_id}` does not have any active task assigned.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
                 await state.clear()
                 return
 
@@ -4263,7 +4266,7 @@ async def process_unassign_user_id_step(message: Message, state: FSMContext):
             except Exception:
                 pass
 
-        await message.answer(f"✅ **Successfully unassigned Task #{task_id} from User `{target_id}`, removed task message, and returned it to pool.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        await message.answer(f"<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> **Successfully unassigned Task #{task_id} from User `{target_id}`, removed task message, and returned it to pool.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
         
         asyncio.create_task(send_user_notification(
             target_id,
@@ -4635,9 +4638,9 @@ async def process_dustbin_replace(message: Message, state: FSMContext):
 
 def get_videos_menu_keyboard():
     kb = InlineKeyboardBuilder()
-    task_status = "🟢 Set" if TASK_VIDEO_LINK else "🔴 Not Set"
-    sell_status = "🟢 Set" if SELL_VIDEO_LINK else "🔴 Not Set"
-    howto_status = "🟢 Set" if HOWTO_VIDEO_LINK else "🔴 Not Set"
+    task_status = "<tg-emoji emoji-id=\"5416081784641168838\">🟢</tg-emoji> Set" if TASK_VIDEO_LINK else "<tg-emoji emoji-id=\"5411225014148014586\">🔴</tg-emoji> Not Set"
+    sell_status = "<tg-emoji emoji-id=\"5416081784641168838\">🟢</tg-emoji> Set" if SELL_VIDEO_LINK else "<tg-emoji emoji-id=\"5411225014148014586\">🔴</tg-emoji> Not Set"
+    howto_status = "<tg-emoji emoji-id=\"5416081784641168838\">🟢</tg-emoji> Set" if HOWTO_VIDEO_LINK else "<tg-emoji emoji-id=\"5411225014148014586\">🔴</tg-emoji> Not Set"
     kb.button(text=f"Tasks Video: {task_status}", icon_custom_emoji_id="5197269100878907942", callback_data="video_set:tasks", style="primary")
     kb.button(text=f"Sell Video: {sell_status}", icon_custom_emoji_id="5377548235709619284", callback_data="video_set:sell", style="primary")
     kb.button(text=f"How To Use Bot Video: {howto_status}", icon_custom_emoji_id="5436113877181941026", callback_data="video_set:howto", style="primary")
@@ -4895,7 +4898,7 @@ async def process_add_balance_step(message: Message, state: FSMContext):
                 await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", target_id, "admin_add", amount, "Added by admin")
 
         invalidate_user_cache(target_id)
-        await message.answer(f"✅ **Added ₹{amount:.2f} to User `{target_id}`'s balance.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        await message.answer(f"<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> **Added ₹{amount:.2f} to User `{target_id}`'s balance.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
         
         asyncio.create_task(send_user_notification(
             target_id,
@@ -4903,7 +4906,7 @@ async def process_add_balance_step(message: Message, state: FSMContext):
             parse_mode=ParseMode.HTML
         ))
     except Exception as e:
-        await message.answer(f"❌ Invalid format or error: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        await message.answer(f"<tg-emoji emoji-id=\"5274099962655816924\">❌</tg-emoji> Invalid format or error: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
 @dp.message(F.text == "Cut Balance", StateFilter("*"))
@@ -4928,7 +4931,7 @@ async def process_cut_balance_step(message: Message, state: FSMContext):
                 await conn.execute("INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)", target_id, "admin_deduct", -amount, "Deducted by admin")
 
         invalidate_user_cache(target_id)
-        await message.answer(f"✅ **Deducted ₹{amount:.2f} from User `{target_id}`'s balance.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        await message.answer(f"<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> **Deducted ₹{amount:.2f} from User `{target_id}`'s balance.**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
         
         async with db_pool.acquire() as conn:
             target_user_data = await conn.fetchrow("SELECT currency FROM users WHERE user_id=$1", target_id)
@@ -4941,7 +4944,7 @@ async def process_cut_balance_step(message: Message, state: FSMContext):
             parse_mode=ParseMode.HTML
         ))
     except Exception as e:
-        await message.answer(f"❌ Invalid format or error: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        await message.answer(f"<tg-emoji emoji-id=\"5274099962655816924\">❌</tg-emoji> Invalid format or error: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
 @dp.message(F.text == "Check Balance", StateFilter("*"))
@@ -4958,7 +4961,7 @@ async def process_check_balance_step(message: Message, state: FSMContext):
         target_id = int(message.text.strip())
         user_data = await get_user_data(target_id)
         if not user_data:
-            await message.answer(f"📭 User `{target_id}` not found in database.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+            await message.answer(f"<tg-emoji emoji-id=\"5262831879731555779\">📭</tg-emoji> User `{target_id}` not found in database.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
             await state.clear()
             return
 
@@ -4967,7 +4970,7 @@ async def process_check_balance_step(message: Message, state: FSMContext):
         usdt = user_data['usdt_address']
 
         await message.answer(
-            f"👤 **User Information for `{target_id}`:**\n\n"
+            f"<tg-emoji emoji-id=\"5870458774455587120\">👤</tg-emoji> **User Information for `{target_id}`:**\n\n"
             f"• **Balance:** ₹{bal:.2f}\n"
             f"• **UPI:** `{upi}`\n"
             f"• **USDT BEP-20:** `{usdt}`",
@@ -5001,7 +5004,7 @@ async def admin_btn_transactions(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     await state.set_state(AdminState.waiting_for_user_transactions)
-    await message.answer("💳 Send the User ID to check their transaction history:", parse_mode=ParseMode.MARKDOWN)
+    await message.answer("<tg-emoji emoji-id=\"5445353829304387411\">💳</tg-emoji> Send the User ID to check their transaction history:", parse_mode=ParseMode.MARKDOWN)
 
 @dp.message(AdminState.waiting_for_user_transactions, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_user_transactions_step(message: Message, state: FSMContext):
@@ -5063,7 +5066,7 @@ async def admin_btn_ban_user(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     await state.set_state(AdminState.waiting_for_ban_user)
-    await message.answer("🚫 Send the numeric User ID to ban:", parse_mode=ParseMode.MARKDOWN)
+    await message.answer("<tg-emoji emoji-id=\"5240241223632954241\">🚫</tg-emoji> Send the numeric User ID to ban:", parse_mode=ParseMode.MARKDOWN)
 
 @dp.message(AdminState.waiting_for_ban_user, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_ban_user_step(message: Message, state: FSMContext):
@@ -5076,7 +5079,7 @@ async def process_ban_user_step(message: Message, state: FSMContext):
             return
 
         if target_id in BANNED_USERS_CACHE:
-            await message.answer(f"⚠️ User `{target_id}` is already banned.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+            await message.answer(f"<tg-emoji emoji-id=\"5420323339723881652\">⚠️</tg-emoji> User `{target_id}` is already banned.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
             await state.clear()
             return
 
@@ -5084,7 +5087,7 @@ async def process_ban_user_step(message: Message, state: FSMContext):
             await conn.execute("INSERT INTO banned_users (user_id) VALUES ($1) ON CONFLICT DO NOTHING", target_id)
 
         BANNED_USERS_CACHE.add(target_id)
-        await message.answer(f"🚫 **User `{target_id}` has been banned!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        await message.answer(f"<tg-emoji emoji-id=\"5240241223632954241\">🚫</tg-emoji> **User `{target_id}` has been banned!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
     except ValueError:
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
@@ -5094,7 +5097,7 @@ async def admin_btn_unban_user(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     await state.set_state(AdminState.waiting_for_unban_user)
-    await message.answer("✅ Send the numeric User ID to unban:", parse_mode=ParseMode.MARKDOWN)
+    await message.answer("<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> Send the numeric User ID to unban:", parse_mode=ParseMode.MARKDOWN)
 
 @dp.message(AdminState.waiting_for_unban_user, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_unban_user_step(message: Message, state: FSMContext):
@@ -5106,12 +5109,12 @@ async def process_unban_user_step(message: Message, state: FSMContext):
             res = await conn.execute("DELETE FROM banned_users WHERE user_id=$1", target_id)
 
         if res == "DELETE 0" and target_id not in BANNED_USERS_CACHE:
-            await message.answer(f"⚠️ User `{target_id}` is not currently banned, so they cannot be unbanned.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+            await message.answer(f"<tg-emoji emoji-id=\"5420323339723881652\">⚠️</tg-emoji> User `{target_id}` is not currently banned, so they cannot be unbanned.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
             await state.clear()
             return
 
         BANNED_USERS_CACHE.discard(target_id)
-        await message.answer(f"✅ **User `{target_id}` has been unbanned!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+        await message.answer(f"<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> **User `{target_id}` has been unbanned!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
     except ValueError:
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
@@ -5954,7 +5957,7 @@ async def admin_btn_remove_task(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     await state.set_state(AdminState.waiting_for_remove_task)
-    await message.answer("🗑 Send the Task ID to remove (e.g. `3`):", parse_mode=ParseMode.MARKDOWN)
+    await message.answer("<tg-emoji emoji-id=\"5262529363710060188\">🗑</tg-emoji> Send the Task ID to remove (e.g. `3`):", parse_mode=ParseMode.MARKDOWN)
 
 @dp.message(AdminState.waiting_for_remove_task, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
 async def process_remove_task_step(message: Message, state: FSMContext):
@@ -5967,9 +5970,9 @@ async def process_remove_task_step(message: Message, state: FSMContext):
                 res = await conn.execute("DELETE FROM tasks WHERE id=$1", task_id)
 
         if res == "DELETE 0":
-            await message.answer(f"📭 Task `#{task_id}` not found.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+            await message.answer(f"<tg-emoji emoji-id=\"5262831879731555779\">📭</tg-emoji> Task `#{task_id}` not found.", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
         else:
-            await message.answer(f"✅ **Task `#{task_id}` removed successfully!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
+            await message.answer(f"<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> **Task `#{task_id}` removed successfully!**", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
     except ValueError:
         await message.answer("❌ Invalid Task ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
@@ -6579,7 +6582,7 @@ async def approve_sell_unified(call: CallbackQuery):
     async def notify_user():
         user_data = await get_user_data(user_id)
         formatted_amt = format_currency(amount, user_data['currency'])
-        await send_user_notification(user_id, f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Your Gmail sell request #{sell_id} was approved!\n+{formatted_amt} added to your balance.", parse_mode=ParseMode.HTML)
+        await send_user_notification(user_id, f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Your Gmail sell request #{sell_id} was approved!\n+{formatted_amt} added to your balance.")
 
     asyncio.create_task(notify_user())
 
@@ -6705,7 +6708,7 @@ async def approve_task(call: CallbackQuery):
     async def notify_user():
         user_data = await get_user_data(user_id)
         formatted_reward = format_currency(reward, user_data['currency'])
-        await send_user_notification(user_id, f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Task #{task_id} approved!\n+{formatted_reward} added to your balance.", parse_mode=ParseMode.HTML)
+        await send_user_notification(user_id, f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Task #{task_id} approved!\n+{formatted_reward} added to your balance.")
 
     asyncio.create_task(notify_user())
 
@@ -6802,7 +6805,7 @@ async def pay_withdraw(call: CallbackQuery):
     async def notify_user():
         user_data = await get_user_data(user_id)
         formatted_amt = format_currency(payout_amount, user_data['currency'])
-        await send_user_notification(user_id, f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Your withdrawal request of {formatted_amt} has been approved and paid!", parse_mode=ParseMode.HTML)
+        await send_user_notification(user_id, f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Your withdrawal request of {formatted_amt} has been approved and paid!")
 
     asyncio.create_task(notify_user())
 
