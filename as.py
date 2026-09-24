@@ -2480,7 +2480,7 @@ async def cb_get_task(call: CallbackQuery, state: FSMContext):
 
         task = await conn.fetchrow("SELECT id, title, details, reward FROM tasks WHERE status='available' ORDER BY RANDOM() LIMIT 1")
         if not task:
-            txt = '<tg-emoji emoji-id=\"5262831879731555779\">📭</tg-emoji> No tasks available right now.'
+            txt = f'<tg-emoji emoji-id=\"5262831879731555779\">📭</tg-emoji> No tasks available right now.'
             try:
                 await call.message.edit_text(txt, reply_markup=get_main_menu_keyboard())
             except TelegramBadRequest as e:
