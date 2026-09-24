@@ -107,12 +107,12 @@ USER_CACHE = {}       # {user_id: dict_data}
 
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
-    "Get Task", "Balance", "Sell Gmail", "History", "Referrals", "📁 My Accounts", "Settings", "Support", "Cancel", "Main Menu",
-    "Add Task", "Tasks", "Available Tasks", "📥 Pending Reviews", "Pending Withdrawals", "💬 Chat", "Unassign Tasks", "🔍 Find ID", "Add Balance", 
-    "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "Ban User", "Unban User",
+    "Get Task", "Balance", "Sell Gmail", "History", "Referrals", "My Accounts", "Settings", "Support", "Cancel", "Main Menu",
+    "Add Task", "Tasks", "Available Tasks", "Pending Reviews", "Pending Withdrawals", "Chat", "Unassign Tasks", "Find ID", "Add Balance", 
+    "Cut Balance", "Check Balance", "Top Balances", "Ban User", "Unban User",
     "Broadcast", "Change Values", "Remove Task", "Transactions", "View Stats",
-    "Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "Validator", "👑 Transfer Admin",
-    "🟢 Ultra Status: ON", "🔴 Ultra Status: OFF", "Manage Workers", "Dustbin", "🤷‍♂️Videos"
+    "Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "Validator", "Transfer Admin",
+    "🟢 Ultra Status: ON", "🔴 Ultra Status: OFF", "Manage Workers", "Dustbin", "Videos"
 }
 
 # ============================================
@@ -571,8 +571,8 @@ async def api_sell_gmail(request: web.Request):
         )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Approve", callback_data=f"sa:{sell_id}", style="success"),
-        InlineKeyboardButton(text="❌ Decline", callback_data=f"sd:{sell_id}", style="danger")
+        InlineKeyboardButton(text="Approve", icon_custom_emoji_id="6217663806110175239", callback_data=f"sa:{sell_id}", style="success"),
+        InlineKeyboardButton(text="Decline", icon_custom_emoji_id="5274099962655816924", callback_data=f"sd:{sell_id}", style="danger")
     ]])
     try:
         await bot.send_message(
@@ -1295,7 +1295,8 @@ def get_main_menu_keyboard():
         style="success"
     )
     kb.button(
-        text="📁 My Accounts",
+        text="My Accounts",
+        icon_custom_emoji_id="6300651782678781823",
         callback_data="menu_my_accounts",
         style="primary"
     )
@@ -1383,18 +1384,18 @@ def get_admin_menu_keyboard():
     kb.button(text="Tasks", icon_custom_emoji_id="5197269100878907942", style="primary")
     
     kb.button(text="Available Tasks", icon_custom_emoji_id="5416081784641168838", style="primary")
-    kb.button(text="📥 Pending Reviews", style="primary")
+    kb.button(text="Pending Reviews", icon_custom_emoji_id="5395444784611480792", style="primary")
     
     kb.button(text="Pending Withdrawals", icon_custom_emoji_id="5444856076954520455", style="primary")
-    kb.button(text="💬 Chat", style="primary")
+    kb.button(text="Chat", icon_custom_emoji_id="5265079444707486638", style="primary")
     
     kb.button(text="Unassign Tasks", icon_custom_emoji_id="5262529363710060188", style="danger")
-    kb.button(text="🔍 Find ID", style="primary")
+    kb.button(text="Find ID", icon_custom_emoji_id="5307843983102204243", style="primary")
     
     kb.button(text="Add Balance", icon_custom_emoji_id="5397916757333654639", style="success")
-    kb.button(text="➖ Cut Balance", style="danger")
-    kb.button(text="🔎 Check Balance", style="primary")
-    kb.button(text="🏆 Top Balances", style="primary")
+    kb.button(text="Cut Balance", icon_custom_emoji_id="5240241223632954241", style="danger")
+    kb.button(text="Check Balance", icon_custom_emoji_id="5215420556089776398", style="primary")
+    kb.button(text="Top Balances", icon_custom_emoji_id="6183525361637136222", style="primary")
     kb.button(text="Ban User", icon_custom_emoji_id="5240241223632954241", style="danger")
     kb.button(text="Unban User", icon_custom_emoji_id="6217663806110175239", style="success")
     kb.button(text="Broadcast", icon_custom_emoji_id="5332724926216428039", style="primary")
@@ -1415,10 +1416,10 @@ def get_admin_menu_keyboard():
     kb.button(text=ultra_btn_text, style="success" if ULTRA_STATUS else "danger")
 
     kb.button(text="Dustbin", icon_custom_emoji_id="5309832892262654231", style="danger")
-    kb.button(text="🤷‍♂️Videos", style="primary")
+    kb.button(text="Videos", icon_custom_emoji_id="5305265301917549162", style="primary")
 
     kb.button(text="Manage Workers", icon_custom_emoji_id="5264713049637409446", style="primary")
-    kb.button(text="👑 Transfer Admin", style="danger")
+    kb.button(text="Transfer Admin", icon_custom_emoji_id="5217822164362739968", style="danger")
 
     kb.button(text="Main Menu", icon_custom_emoji_id="5416041192905265756", style="primary")
     
@@ -1595,10 +1596,10 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool, ultra_set: bool =
 
 def get_withdraw_options_keyboard():
     kb = InlineKeyboardBuilder()
-    kb.button(text=f"🏦 Withdraw via UPI (Fee: ₹{UPI_FEES:.2f})", callback_data="withdraw_upi", style="success")
-    kb.button(text=f"🪙 Withdraw via USDT BEP-20 (Fee: ₹{USDT_FEES:.2f})", callback_data="withdraw_usdt", style="success")
+    kb.button(text=f"Withdraw via UPI (Fee: ₹{UPI_FEES:.2f})", icon_custom_emoji_id="6291696801636424911", callback_data="withdraw_upi", style="success")
+    kb.button(text=f"Withdraw via USDT BEP-20 (Fee: ₹{USDT_FEES:.2f})", icon_custom_emoji_id="5197434882321567830", callback_data="withdraw_usdt", style="success")
     if ULTRA_STATUS:
-        kb.button(text=f"⚡️ Withdraw via Ultra Gateway (0 Fees)", callback_data="withdraw_ultra", style="success")
+        kb.button(text=f"Withdraw via Ultra Gateway (0 Fees)", icon_custom_emoji_id="5195033767969839232", callback_data="withdraw_ultra", style="success")
     kb.button(
         text="⬅️ Back",
         callback_data="menu_balance"
@@ -1632,7 +1633,7 @@ def get_task_action_keyboard():
         )
     ]]
     if TASK_VIDEO_LINK:
-        rows.append([InlineKeyboardButton(text="🎬 Tutorial Video", url=TASK_VIDEO_LINK)])
+        rows.append([InlineKeyboardButton(text="Tutorial Video", icon_custom_emoji_id="5282843764451195532", url=TASK_VIDEO_LINK)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def get_support_cancel_keyboard():
@@ -1911,7 +1912,7 @@ async def render_transaction_history_page(target_user_id: int, page: int = 1, is
         kb.row(*nav_buttons)
 
     if not is_admin:
-        kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back"))
+        kb.row(InlineKeyboardButton(text="Back", icon_custom_emoji_id="5875082500023258804", callback_data="menu_back"))
 
     return text, kb.as_markup()
 
@@ -2047,14 +2048,14 @@ async def start(message: Message, state: FSMContext, command: CommandObject = No
         
         if is_new_user:
             text = (
-                '👋 <b>Welcome to Gmail Earnex!</b>\n\n'
+                '<tg-emoji emoji-id=\"5195448447062251797\">👋</tg-emoji> <b>Welcome to Gmail Earnex!</b>\n\n'
                 '💵 <b>Default Currency Selected:</b> <code>USD ($)</code>\n'
                 '<tg-emoji emoji-id=\"5893161718179173515\">⚙️</tg-emoji> <i>You can change your currency anytime in <b>Settings</b>.</i>\n\n'
                 'Choose an option from the menu below:'
             )
         else:
             text = (
-                '👋 <b>Welcome back.</b>\n\n'
+                '<tg-emoji emoji-id=\"5195448447062251797\">👋</tg-emoji> <b>Welcome back.</b>\n\n'
                 'Choose an option from the menu below:'
             )
         
@@ -2085,7 +2086,7 @@ async def cb_menu_back(call: CallbackQuery, state: FSMContext):
     await call.answer()
     await state.clear()
     text = (
-        '👋 <b>Welcome back.</b>\n\n'
+        '<tg-emoji emoji-id=\"5195448447062251797\">👋</tg-emoji> <b>Welcome back.</b>\n\n'
         'Choose an option from the menu below:'
     )
     try:
@@ -2318,7 +2319,7 @@ async def render_my_accounts_page(user_id: int, page: int = 1):
         
         kb.row(*nav_buttons)
 
-    kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back"))
+    kb.row(InlineKeyboardButton(text="Back", icon_custom_emoji_id="5875082500023258804", callback_data="menu_back"))
 
     return text, kb.as_markup()
 
@@ -2578,8 +2579,8 @@ async def cb_sell_gmail(call: CallbackQuery, state: FSMContext):
     )
     sell_kb = InlineKeyboardBuilder()
     if SELL_VIDEO_LINK:
-        sell_kb.button(text="🎬 Tutorial Video", url=SELL_VIDEO_LINK)
-    sell_kb.button(text="⬅️ Back", callback_data="menu_back")
+        sell_kb.button(text="Tutorial Video", icon_custom_emoji_id="5282843764451195532", url=SELL_VIDEO_LINK)
+    sell_kb.button(text="Back", icon_custom_emoji_id="5875082500023258804", callback_data="menu_back")
     sell_kb.adjust(1)
     sell_markup = sell_kb.as_markup()
     try:
@@ -2669,8 +2670,8 @@ async def process_sell_password(message: Message, state: FSMContext):
         )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="✅ Approve", callback_data=f"sa:{sell_id}", style="success"),
-        InlineKeyboardButton(text="❌ Decline", callback_data=f"sd:{sell_id}", style="danger")
+        InlineKeyboardButton(text="Approve", icon_custom_emoji_id="6217663806110175239", callback_data=f"sa:{sell_id}", style="success"),
+        InlineKeyboardButton(text="Decline", icon_custom_emoji_id="5274099962655816924", callback_data=f"sd:{sell_id}", style="danger")
     ]])
 
     admin_message_text = (
@@ -3110,7 +3111,7 @@ async def cb_admin_view_worker(call: CallbackQuery):
 
     kb.button(text=toggle_access_label, callback_data=f"adm_work_tog_access:{worker_id}")
     kb.button(text=toggle_sell_label, callback_data=f"adm_work_tog_sell:{worker_id}")
-    kb.button(text="⬅️ Back to Workers", callback_data="adm_work_back")
+    kb.button(text="Back to Workers", icon_custom_emoji_id="5875082500023258804", callback_data="adm_work_back")
     kb.adjust(1, 1, 1)
 
     try:
@@ -3539,7 +3540,7 @@ async def process_change_validator_key(message: Message, state: FSMContext):
     )
     await state.clear()
 
-@dp.message(F.text == "👑 Transfer Admin", StateFilter("*"))
+@dp.message(F.text == "Transfer Admin", StateFilter("*"))
 async def admin_btn_transfer_admin(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -3774,7 +3775,7 @@ async def cb_cancel_add_duplicate_task(call: CallbackQuery, state: FSMContext):
         pass
     await call.message.answer("🏠 Returned to Admin Menu.", reply_markup=get_admin_menu_keyboard())
 
-@dp.message(F.text == "📥 Pending Reviews", StateFilter("*"))
+@dp.message(F.text == "Pending Reviews", StateFilter("*"))
 async def admin_btn_pending_reviews(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -3880,8 +3881,8 @@ async def cb_admin_view_pending_sells(call: CallbackQuery):
         claimed_str = f"\n<tg-emoji emoji-id=\"5264713049637409446\">👷</tg-emoji> <b>Claimed By Worker:</b> <code>{claimed_by}</code>" if claimed_by else "\n<tg-emoji emoji-id=\"5472027899789843495\">📦</tg-emoji> <b>Status:</b> <tg-emoji emoji-id=\"5416081784641168838\">🟢</tg-emoji> Unclaimed Stock"
 
         kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="✅ Approve", callback_data=f"sa:{sell_id}", style="success"),
-            InlineKeyboardButton(text="❌ Decline", callback_data=f"sd:{sell_id}", style="danger")
+            InlineKeyboardButton(text="Approve", icon_custom_emoji_id="6217663806110175239", callback_data=f"sa:{sell_id}", style="success"),
+            InlineKeyboardButton(text="Decline", icon_custom_emoji_id="5274099962655816924", callback_data=f"sd:{sell_id}", style="danger")
         ]])
 
         await call.message.answer(
@@ -4088,7 +4089,7 @@ async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
             parse_mode=ParseMode.HTML
         )
 
-@dp.message(F.text == "💬 Chat", StateFilter("*"))
+@dp.message(F.text == "Chat", StateFilter("*"))
 async def admin_btn_chat(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -4279,7 +4280,7 @@ async def process_unassign_user_id_step(message: Message, state: FSMContext):
 
 def get_dustbin_menu_keyboard():
     kb = InlineKeyboardBuilder()
-    kb.button(text="🧹 Clear Dust", callback_data="dustbin_clear", style="danger")
+    kb.button(text="Clear Dust", icon_custom_emoji_id="5231361378748472914", callback_data="dustbin_clear", style="danger")
     kb.button(text="See Dustbin", icon_custom_emoji_id="5262529363710060188", callback_data="dustbin_view:1", style="primary")
     kb.adjust(2)
     return kb.as_markup()
@@ -4472,11 +4473,11 @@ def get_dustbin_item_keyboard(dustbin_id: int, page: int, total: int):
         nav_row.append(InlineKeyboardButton(text="Next ->", callback_data=f"dustbin_view:{page + 1}"))
     kb.row(*nav_row)
     kb.row(
-        InlineKeyboardButton(text="♻️ Restore", callback_data=f"dustbin_restore:{dustbin_id}:{page}", style="success"),
-        InlineKeyboardButton(text="🗑 Delete", callback_data=f"dustbin_delete:{dustbin_id}:{page}", style="danger"),
-        InlineKeyboardButton(text="✏️ Replace", callback_data=f"dustbin_replace:{dustbin_id}:{page}", style="primary")
+        InlineKeyboardButton(text="Restore", icon_custom_emoji_id="5237699328843200968", callback_data=f"dustbin_restore:{dustbin_id}:{page}", style="success"),
+        InlineKeyboardButton(text="Delete", icon_custom_emoji_id="5262529363710060188", callback_data=f"dustbin_delete:{dustbin_id}:{page}", style="danger"),
+        InlineKeyboardButton(text="Replace", icon_custom_emoji_id="5348227245599105972", callback_data=f"dustbin_replace:{dustbin_id}:{page}", style="primary")
     )
-    kb.row(InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back"))
+    kb.row(InlineKeyboardButton(text="Back", icon_custom_emoji_id="5875082500023258804", callback_data="menu_back"))
     return kb.as_markup()
 
 async def render_dustbin_page(page: int):
@@ -4636,13 +4637,13 @@ def get_videos_menu_keyboard():
     task_status = "<tg-emoji emoji-id=\"5416081784641168838\">🟢</tg-emoji> Set" if TASK_VIDEO_LINK else "<tg-emoji emoji-id=\"5411225014148014586\">🔴</tg-emoji> Not Set"
     sell_status = "<tg-emoji emoji-id=\"5416081784641168838\">🟢</tg-emoji> Set" if SELL_VIDEO_LINK else "<tg-emoji emoji-id=\"5411225014148014586\">🔴</tg-emoji> Not Set"
     howto_status = "<tg-emoji emoji-id=\"5416081784641168838\">🟢</tg-emoji> Set" if HOWTO_VIDEO_LINK else "<tg-emoji emoji-id=\"5411225014148014586\">🔴</tg-emoji> Not Set"
-    kb.button(text=f"✍️ Tasks Video: {task_status}", callback_data="video_set:tasks", style="primary")
-    kb.button(text=f"📨 Sell Video: {sell_status}", callback_data="video_set:sell", style="primary")
-    kb.button(text=f"📘 How To Use Bot Video: {howto_status}", callback_data="video_set:howto", style="primary")
+    kb.button(text=f"Tasks Video: {task_status}", icon_custom_emoji_id="5197269100878907942", callback_data="video_set:tasks", style="primary")
+    kb.button(text=f"Sell Video: {sell_status}", icon_custom_emoji_id="5377548235709619284", callback_data="video_set:sell", style="primary")
+    kb.button(text=f"How To Use Bot Video: {howto_status}", icon_custom_emoji_id="5436113877181941026", callback_data="video_set:howto", style="primary")
     kb.adjust(1, 1, 1)
     return kb.as_markup()
 
-@dp.message(F.text == "🤷‍♂️Videos", StateFilter("*"))
+@dp.message(F.text == "Videos", StateFilter("*"))
 async def admin_btn_videos(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -4725,7 +4726,7 @@ async def process_video_link(message: Message, state: FSMContext):
     else:
         await message.answer(f"<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> <b>{label}</b> video link updated!\n\n<tg-emoji emoji-id=\"5271604874419647061\">🔗</tg-emoji> {new_value}", parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
 
-@dp.message(F.text == "🔍 Find ID", StateFilter("*"))
+@dp.message(F.text == "Find ID", StateFilter("*"))
 async def admin_btn_find_id(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -4904,7 +4905,7 @@ async def process_add_balance_step(message: Message, state: FSMContext):
         await message.answer(f"<tg-emoji emoji-id=\"5274099962655816924\">❌</tg-emoji> Invalid format or error: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(F.text == "➖ Cut Balance", StateFilter("*"))
+@dp.message(F.text == "Cut Balance", StateFilter("*"))
 async def admin_btn_cut_balance(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -4942,7 +4943,7 @@ async def process_cut_balance_step(message: Message, state: FSMContext):
         await message.answer(f"<tg-emoji emoji-id=\"5274099962655816924\">❌</tg-emoji> Invalid format or error: `{e}`", parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(F.text == "🔎 Check Balance", StateFilter("*"))
+@dp.message(F.text == "Check Balance", StateFilter("*"))
 async def admin_btn_check_balance(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -4976,7 +4977,7 @@ async def process_check_balance_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(F.text == "🏆 Top Balances", StateFilter("*"))
+@dp.message(F.text == "Top Balances", StateFilter("*"))
 async def admin_btn_top_balances(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -5120,7 +5121,7 @@ async def admin_btn_broadcast(message: Message, state: FSMContext):
         return
     await state.clear()
     kb = InlineKeyboardBuilder()
-    kb.button(text="✉️ Message", callback_data="bc_type:message", style="primary")
+    kb.button(text="Message", icon_custom_emoji_id="5434144690511290129", callback_data="bc_type:message", style="primary")
     kb.button(text="Giveaway", icon_custom_emoji_id="5461151367559141950", callback_data="bc_type:giveaway", style="success")
     kb.adjust(2)
     await message.answer(
@@ -5176,9 +5177,9 @@ async def process_broadcast_message(message: Message, state: FSMContext):
     await state.set_state(AdminState.waiting_for_broadcast_target)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🕐 24 Hours", callback_data="bcdur:24")
-    kb.button(text="🕑 48 Hours", callback_data="bcdur:48")
-    kb.button(text="🕒 72 Hours", callback_data="bcdur:72")
+    kb.button(text="24 Hours", icon_custom_emoji_id="5391032818111363540", callback_data="bcdur:24")
+    kb.button(text="48 Hours", icon_custom_emoji_id="5391032818111363540", callback_data="bcdur:48")
+    kb.button(text="72 Hours", icon_custom_emoji_id="5391032818111363540", callback_data="bcdur:72")
     kb.button(text="All Users", icon_custom_emoji_id="5391292736647209211", callback_data="bcdur:all")
     kb.adjust(1)
 
@@ -5331,8 +5332,8 @@ async def process_giveaway_message(message: Message, state: FSMContext):
     await state.set_state(AdminState.waiting_for_giveaway_emoji)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🎲 Dice", callback_data="gwemoji:dice", style="primary")
-    kb.button(text="🎳 Bowling", callback_data="gwemoji:bowling", style="primary")
+    kb.button(text="Dice", icon_custom_emoji_id="5890971177484029249", callback_data="gwemoji:dice", style="primary")
+    kb.button(text="Bowling", icon_custom_emoji_id="5891120371762990493", callback_data="gwemoji:bowling", style="primary")
     kb.adjust(2)
 
     sent = await message.answer(
@@ -5354,9 +5355,9 @@ async def process_giveaway_emoji_selection(call: CallbackQuery, state: FSMContex
     await state.set_state(AdminState.waiting_for_giveaway_target)
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🕐 24 Hours", callback_data="gwdur:24")
-    kb.button(text="🕑 48 Hours", callback_data="gwdur:48")
-    kb.button(text="🕒 72 Hours", callback_data="gwdur:72")
+    kb.button(text="24 Hours", icon_custom_emoji_id="5391032818111363540", callback_data="gwdur:24")
+    kb.button(text="48 Hours", icon_custom_emoji_id="5391032818111363540", callback_data="gwdur:48")
+    kb.button(text="72 Hours", icon_custom_emoji_id="5391032818111363540", callback_data="gwdur:72")
     kb.button(text="All Users", icon_custom_emoji_id="5391292736647209211", callback_data="gwdur:all")
     kb.adjust(1)
 
@@ -6487,8 +6488,8 @@ async def handle_task_submission(message: Message, state: FSMContext):
                 try:
                     w_bot = Bot(token=WORKER_BOT_TOKEN)
                     worker_kb = InlineKeyboardMarkup(inline_keyboard=[[
-                        InlineKeyboardButton(text="✅ Approve", callback_data=f"w_ta:{task_id}", style="success"),
-                        InlineKeyboardButton(text="❌ Decline", callback_data=f"w_td:{task_id}", style="danger")
+                        InlineKeyboardButton(text="Approve", icon_custom_emoji_id="6217663806110175239", callback_data=f"w_ta:{task_id}", style="success"),
+                        InlineKeyboardButton(text="Decline", icon_custom_emoji_id="5274099962655816924", callback_data=f"w_td:{task_id}", style="danger")
                     ]])
                     worker_msg_text = (
                         f'<tg-emoji emoji-id=\"5305265301917549162\">📤</tg-emoji> <b>New Task Submission #{task_id}</b>\n\n'
