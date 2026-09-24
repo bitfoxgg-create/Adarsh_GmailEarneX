@@ -107,12 +107,12 @@ USER_CACHE = {}       # {user_id: dict_data}
 
 # List of all menu buttons to prevent state bleeding
 MENU_BUTTONS = {
-    "✍️ Get Task", "💰 Balance", "📨 Sell Gmail", "📜 History", "👥 Referrals", "📁 My Accounts", "⚙️ Settings", "🛠 Support", "🚫 Cancel", "🏠 Main Menu",
-    "➕ Add Task", "📋 Tasks", "🟢 Available Tasks", "📥 Pending Reviews", "💸 Pending Withdrawals", "💬 Chat", "🗑 Unassign Tasks", "🔍 Find ID", "➕ Add Balance", 
-    "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "🚫 Ban User", "✅ Unban User",
-    "📢 Broadcast", "⚙️ Change Values", "🗑 Remove Task", "💳 Transactions", "📊 View Stats",
-    "📢 Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "⚙️ Validator", "👑 Transfer Admin",
-    "🟢 Ultra Status: ON", "🔴 Ultra Status: OFF", "👷 Manage Workers", "🤖Dustbin", "🤷‍♂️Videos"
+    "Get Task", "Balance", "Sell Gmail", "History", "Referrals", "📁 My Accounts", "Settings", "Support", "Cancel", "Main Menu",
+    "Add Task", "Tasks", "Available Tasks", "📥 Pending Reviews", "Pending Withdrawals", "💬 Chat", "Unassign Tasks", "🔍 Find ID", "Add Balance", 
+    "➖ Cut Balance", "🔎 Check Balance", "🏆 Top Balances", "Ban User", "Unban User",
+    "Broadcast", "Change Values", "Remove Task", "Transactions", "View Stats",
+    "Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "Validator", "👑 Transfer Admin",
+    "🟢 Ultra Status: ON", "🔴 Ultra Status: OFF", "Manage Workers", "Dustbin", "🤷‍♂️Videos"
 }
 
 # ============================================
@@ -1258,9 +1258,9 @@ async def check_user_joined_channel(user_id: int) -> bool:
 def get_must_join_keyboard():
     channel_url = f"https://t.me/{MUST_JOIN_CHANNEL.replace('@', '')}" if MUST_JOIN_CHANNEL.startswith("@") else "https://t.me/"
     kb = InlineKeyboardBuilder()
-    kb.button(text="📢 Join Channel", icon_custom_emoji_id="5332724926216428039", url=channel_url)
+    kb.button(text="Join Channel", icon_custom_emoji_id="5332724926216428039", url=channel_url)
     kb.button(
-        text="✅ Joined / Verify", icon_custom_emoji_id="6217663806110175239", 
+        text="Joined / Verify", icon_custom_emoji_id="6217663806110175239", 
         callback_data="check_must_join",
         style="success"
     )
@@ -1270,27 +1270,27 @@ def get_must_join_keyboard():
 def get_main_menu_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="✍️ Get Task", icon_custom_emoji_id="5197269100878907942",
+        text="Get Task", icon_custom_emoji_id="5197269100878907942",
         callback_data="menu_get_task",
         style="success"
     )
     kb.button(
-        text="💰 Balance", icon_custom_emoji_id="5417924076503062111",
+        text="Balance", icon_custom_emoji_id="5417924076503062111",
         callback_data="menu_balance",
         style="primary"
     )
     kb.button(
-        text="📨 Sell Gmail", icon_custom_emoji_id="5377548235709619284",
+        text="Sell Gmail", icon_custom_emoji_id="5377548235709619284",
         callback_data="menu_sell_gmail",
         style="success"
     )
     kb.button(
-        text="📜 History", icon_custom_emoji_id="5440410042773824003",
+        text="History", icon_custom_emoji_id="5440410042773824003",
         callback_data="menu_history",
         style="primary"
     )
     kb.button(
-        text="👥 Referrals", icon_custom_emoji_id="5391292736647209211",
+        text="Referrals", icon_custom_emoji_id="5391292736647209211",
         callback_data="menu_referrals",
         style="success"
     )
@@ -1301,15 +1301,15 @@ def get_main_menu_keyboard():
     )
     if WEBAPP_URL:
         kb.button(
-            text="🚀 Open Mini App", icon_custom_emoji_id="5201691993775818138",
+            text="Open Mini App", icon_custom_emoji_id="5201691993775818138",
             web_app=WebAppInfo(url=WEBAPP_URL)
         )
     kb.button(
-        text="⚙️ Settings", icon_custom_emoji_id="5893161718179173515",
+        text="Settings", icon_custom_emoji_id="5893161718179173515",
         callback_data="menu_settings"
     )
     kb.button(
-        text="🛠 Support", icon_custom_emoji_id="5471960722206366390",
+        text="Support", icon_custom_emoji_id="5471960722206366390",
         callback_data="menu_support",
         style="danger"
     )
@@ -1327,12 +1327,12 @@ def get_main_menu_keyboard():
 def get_add_task_type_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="➕ Single Add", icon_custom_emoji_id="5397916757333654639", 
+        text="Single Add", icon_custom_emoji_id="5397916757333654639", 
         callback_data="admin_add_task_single", 
         style="success"
     )
     kb.button(
-        text="📦 Bulk Add", icon_custom_emoji_id="5472027899789843495", 
+        text="Bulk Add", icon_custom_emoji_id="5472027899789843495", 
         callback_data="admin_add_task_bulk", 
         style="primary"
     )
@@ -1346,12 +1346,12 @@ def get_referral_inline_keyboard(user_id: int):
     
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="🔗 Copy link", icon_custom_emoji_id="5271604874419647061",
+        text="Copy link", icon_custom_emoji_id="5271604874419647061",
         copy_text=CopyTextButton(text=invite_link),
         style="primary"
     )
     kb.button(
-        text="📤 Share link", icon_custom_emoji_id="5305265301917549162",
+        text="Share link", icon_custom_emoji_id="5305265301917549162",
         url=share_url,
         style="primary"
     )
@@ -1379,30 +1379,30 @@ def get_settings_keyboard(notif_enabled: bool, currency: str):
 def get_admin_menu_keyboard():
     kb = ReplyKeyboardBuilder()
     
-    kb.button(text="➕ Add Task", icon_custom_emoji_id="5397916757333654639", style="success")
-    kb.button(text="📋 Tasks", icon_custom_emoji_id="5197269100878907942", style="primary")
+    kb.button(text="Add Task", icon_custom_emoji_id="5397916757333654639", style="success")
+    kb.button(text="Tasks", icon_custom_emoji_id="5197269100878907942", style="primary")
     
-    kb.button(text="🟢 Available Tasks", icon_custom_emoji_id="5416081784641168838", style="primary")
+    kb.button(text="Available Tasks", icon_custom_emoji_id="5416081784641168838", style="primary")
     kb.button(text="📥 Pending Reviews", style="primary")
     
-    kb.button(text="💸 Pending Withdrawals", icon_custom_emoji_id="5444856076954520455", style="primary")
+    kb.button(text="Pending Withdrawals", icon_custom_emoji_id="5444856076954520455", style="primary")
     kb.button(text="💬 Chat", style="primary")
     
-    kb.button(text="🗑 Unassign Tasks", icon_custom_emoji_id="5262529363710060188", style="danger")
+    kb.button(text="Unassign Tasks", icon_custom_emoji_id="5262529363710060188", style="danger")
     kb.button(text="🔍 Find ID", style="primary")
     
-    kb.button(text="➕ Add Balance", icon_custom_emoji_id="5397916757333654639", style="success")
+    kb.button(text="Add Balance", icon_custom_emoji_id="5397916757333654639", style="success")
     kb.button(text="➖ Cut Balance", style="danger")
     kb.button(text="🔎 Check Balance", style="primary")
     kb.button(text="🏆 Top Balances", style="primary")
-    kb.button(text="🚫 Ban User", icon_custom_emoji_id="5240241223632954241", style="danger")
-    kb.button(text="✅ Unban User", icon_custom_emoji_id="6217663806110175239", style="success")
-    kb.button(text="📢 Broadcast", icon_custom_emoji_id="5332724926216428039", style="primary")
-    kb.button(text="⚙️ Change Values", icon_custom_emoji_id="5893161718179173515", style="primary")
-    kb.button(text="🗑 Remove Task", icon_custom_emoji_id="5262529363710060188", style="danger")
-    kb.button(text="💳 Transactions", icon_custom_emoji_id="5445353829304387411", style="primary")
-    kb.button(text="📊 View Stats", icon_custom_emoji_id="5244837092042750681", style="primary")
-    kb.button(text="📢 Must Join Channel", icon_custom_emoji_id="5332724926216428039", style="primary")
+    kb.button(text="Ban User", icon_custom_emoji_id="5240241223632954241", style="danger")
+    kb.button(text="Unban User", icon_custom_emoji_id="6217663806110175239", style="success")
+    kb.button(text="Broadcast", icon_custom_emoji_id="5332724926216428039", style="primary")
+    kb.button(text="Change Values", icon_custom_emoji_id="5893161718179173515", style="primary")
+    kb.button(text="Remove Task", icon_custom_emoji_id="5262529363710060188", style="danger")
+    kb.button(text="Transactions", icon_custom_emoji_id="5445353829304387411", style="primary")
+    kb.button(text="View Stats", icon_custom_emoji_id="5244837092042750681", style="primary")
+    kb.button(text="Must Join Channel", icon_custom_emoji_id="5332724926216428039", style="primary")
     
     status_btn_text = "🟢 Bot Status: ON" if BOT_STATUS else "🔴 Bot Status: OFF"
     kb.button(text=status_btn_text, style="danger" if BOT_STATUS else "success")
@@ -1410,17 +1410,17 @@ def get_admin_menu_keyboard():
     ref_btn_text = "🟢 Ref Status: ON" if REF_STATUS else "🔴 Ref Status: OFF"
     kb.button(text=ref_btn_text, style="success" if REF_STATUS else "danger")
     
-    kb.button(text="⚙️ Validator", icon_custom_emoji_id="5893161718179173515", style="primary")
+    kb.button(text="Validator", icon_custom_emoji_id="5893161718179173515", style="primary")
     ultra_btn_text = "🟢 Ultra Status: ON" if ULTRA_STATUS else "🔴 Ultra Status: OFF"
     kb.button(text=ultra_btn_text, style="success" if ULTRA_STATUS else "danger")
 
-    kb.button(text="🤖Dustbin", icon_custom_emoji_id="5309832892262654231", style="danger")
+    kb.button(text="Dustbin", icon_custom_emoji_id="5309832892262654231", style="danger")
     kb.button(text="🤷‍♂️Videos", style="primary")
 
-    kb.button(text="👷 Manage Workers", icon_custom_emoji_id="5264713049637409446", style="primary")
+    kb.button(text="Manage Workers", icon_custom_emoji_id="5264713049637409446", style="primary")
     kb.button(text="👑 Transfer Admin", style="danger")
 
-    kb.button(text="🏠 Main Menu", icon_custom_emoji_id="5416041192905265756", style="primary")
+    kb.button(text="Main Menu", icon_custom_emoji_id="5416041192905265756", style="primary")
     
     kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
     return kb.as_markup(resize_keyboard=True)
@@ -1428,12 +1428,12 @@ def get_admin_menu_keyboard():
 def get_pending_reviews_inline_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="📨 Sell Gmail", icon_custom_emoji_id="5377548235709619284",
+        text="Sell Gmail", icon_custom_emoji_id="5377548235709619284",
         callback_data="admin_view_pending_sells",
         style="primary"
     )
     kb.button(
-        text="✍️ Task Gmail", icon_custom_emoji_id="5197269100878907942",
+        text="Task Gmail", icon_custom_emoji_id="5197269100878907942",
         callback_data="admin_view_pending_tasks",
         style="primary"
     )
@@ -1443,18 +1443,18 @@ def get_pending_reviews_inline_keyboard():
 def get_pending_withdrawals_inline_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="🏦 UPI", icon_custom_emoji_id="6291696801636424911",
+        text="UPI", icon_custom_emoji_id="6291696801636424911",
         callback_data="admin_view_pending_withdraw_upi",
         style="primary"
     )
     kb.button(
-        text="🪙 USDT BEP-20", icon_custom_emoji_id="5197434882321567830",
+        text="USDT BEP-20", icon_custom_emoji_id="5197434882321567830",
         callback_data="admin_view_pending_withdraw_usdt",
         style="primary"
     )
     if ULTRA_STATUS:
         kb.button(
-            text="⚡️ Ultra Gateway", icon_custom_emoji_id="5195033767969839232",
+            text="Ultra Gateway", icon_custom_emoji_id="5195033767969839232",
             callback_data="admin_view_pending_withdraw_ultra",
             style="primary"
         )
@@ -1466,22 +1466,22 @@ def get_pending_withdrawals_inline_keyboard():
 def get_change_values_inline_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="💰 1. Change Tasks Rate", icon_custom_emoji_id="5417924076503062111",
+        text="1. Change Tasks Rate", icon_custom_emoji_id="5417924076503062111",
         callback_data="admin_change_tasks_rate",
         style="primary"
     )
     kb.button(
-        text="📨 2. Change Sell Rate", icon_custom_emoji_id="5377548235709619284",
+        text="2. Change Sell Rate", icon_custom_emoji_id="5377548235709619284",
         callback_data="admin_change_sell_rate",
         style="primary"
     )
     kb.button(
-        text="💸 3. Change Min. Withdrawal", icon_custom_emoji_id="5444856076954520455",
+        text="3. Change Min. Withdrawal", icon_custom_emoji_id="5444856076954520455",
         callback_data="admin_change_min_withdraw",
         style="primary"
     )
     kb.button(
-        text="🔑 4. Change Task Password", icon_custom_emoji_id="6005570495603282482",
+        text="4. Change Task Password", icon_custom_emoji_id="6005570495603282482",
         callback_data="admin_change_task_pass",
         style="primary"
     )
@@ -1494,12 +1494,12 @@ def get_change_values_inline_keyboard():
     )
 
     kb.button(
-        text="💰 6. Change Fees", icon_custom_emoji_id="5417924076503062111",
+        text="6. Change Fees", icon_custom_emoji_id="5417924076503062111",
         callback_data="admin_change_fees",
         style="primary"
     )
     kb.button(
-        text="⚡️ 7. Change Ultra", icon_custom_emoji_id="5195033767969839232",
+        text="7. Change Ultra", icon_custom_emoji_id="5195033767969839232",
         callback_data="admin_change_ultra",
         style="primary"
     )
@@ -1527,7 +1527,7 @@ def get_validator_admin_inline_keyboard():
     status_style = "danger" if VALIDATOR_ENABLED else "success"
 
     kb.button(
-        text="🔑 Change Key", icon_custom_emoji_id="6005570495603282482", 
+        text="Change Key", icon_custom_emoji_id="6005570495603282482", 
         callback_data="admin_validator_change_key", 
         style="primary"
     )
@@ -1554,12 +1554,12 @@ UNASSIGN_MENU_TEXT = (
 def get_unassign_inline_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="👤 User ID", icon_custom_emoji_id="5870458774455587120", 
+        text="User ID", icon_custom_emoji_id="5870458774455587120", 
         callback_data="unassign_by_user_id", 
         style="primary"
     )
     kb.button(
-        text="👥 All Users", icon_custom_emoji_id="5391292736647209211", 
+        text="All Users", icon_custom_emoji_id="5391292736647209211", 
         callback_data="unassign_all_users", 
         style="danger"
     )
@@ -1579,7 +1579,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool, ultra_set: bool =
         kb.button(text=ultra_link_text, callback_data="link_ultra", style="primary")
 
     kb.button(
-        text="💸 Withdraw", icon_custom_emoji_id="5444856076954520455", 
+        text="Withdraw", icon_custom_emoji_id="5444856076954520455", 
         callback_data="choose_withdraw_method", 
         style="success"
     )
@@ -1626,7 +1626,7 @@ def get_task_action_keyboard():
             style="success"
         ),
         InlineKeyboardButton(
-            text="🚫 Cancel", icon_custom_emoji_id="5240241223632954241", 
+            text="Cancel", icon_custom_emoji_id="5240241223632954241", 
             callback_data="user_cancel_task", 
             style="danger"
         )
@@ -2070,7 +2070,7 @@ async def cancel(message: Message, state: FSMContext):
     sent_msg = await message.answer('❗️ Current operation cancelled.', reply_markup=get_main_menu_keyboard(), parse_mode=ParseMode.HTML)
     await state.update_data(last_menu_msg_id=sent_msg.message_id)
 
-@dp.message(F.text == "🏠 Main Menu", StateFilter("*"))
+@dp.message(F.text == "Main Menu", StateFilter("*"))
 async def return_to_main_menu(message: Message, state: FSMContext):
     await state.clear()
     sent_msg = await message.answer("🏠 Returned to Main Menu.", reply_markup=get_main_menu_keyboard())
@@ -2853,7 +2853,7 @@ async def cb_admin_view_support(call: CallbackQuery):
         ],
         [
             InlineKeyboardButton(
-                text="🚫 Ban User", icon_custom_emoji_id="5240241223632954241",
+                text="Ban User", icon_custom_emoji_id="5240241223632954241",
                 callback_data=f"ban_supp:{target_user_id}",
                 style="danger"
             )
@@ -3059,7 +3059,7 @@ async def render_workers_list_text_and_kb():
     kb.adjust(1)
     return text, kb.as_markup()
 
-@dp.message(F.text == "👷 Manage Workers", StateFilter("*"))
+@dp.message(F.text == "Manage Workers", StateFilter("*"))
 async def admin_btn_manage_workers(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -3364,7 +3364,7 @@ async def process_bot_off_message(message: Message, state: FSMContext):
         reply_markup=get_admin_menu_keyboard()
     )
 
-@dp.message(F.text == "📋 Tasks", StateFilter("*"))
+@dp.message(F.text == "Tasks", StateFilter("*"))
 async def admin_btn_view_all_tasks_dashboard(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -3382,7 +3382,7 @@ async def cb_admin_all_tasks_page(call: CallbackQuery):
     except Exception:
         pass
 
-@dp.message(F.text == "🟢 Available Tasks", StateFilter("*"))
+@dp.message(F.text == "Available Tasks", StateFilter("*"))
 async def admin_btn_view_tasks_dashboard(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -3400,7 +3400,7 @@ async def cb_admin_tasks_page(call: CallbackQuery):
     except Exception:
         pass
 
-@dp.message(F.text == "⚙️ Validator", StateFilter("*"))
+@dp.message(F.text == "Validator", StateFilter("*"))
 async def admin_btn_validator_menu(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -3592,7 +3592,7 @@ async def process_transfer_admin_id_step(message: Message, state: FSMContext):
 
     await state.clear()
 
-@dp.message(F.text == "➕ Add Task", StateFilter("*"))
+@dp.message(F.text == "Add Task", StateFilter("*"))
 async def admin_btn_add_task(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -3707,7 +3707,7 @@ async def process_add_task_step(message: Message, state: FSMContext):
         await state.update_data(pending_add_username=username)
         kb = InlineKeyboardBuilder()
         kb.button(
-            text="✅ Confirm", icon_custom_emoji_id="6217663806110175239", 
+            text="Confirm", icon_custom_emoji_id="6217663806110175239", 
             callback_data="confirm_add_duplicate_task", 
             style="success"
         )
@@ -3950,7 +3950,7 @@ async def cb_admin_view_pending_tasks(call: CallbackQuery):
             parse_mode=ParseMode.HTML
         )
 
-@dp.message(F.text == "💸 Pending Withdrawals", StateFilter("*"))
+@dp.message(F.text == "Pending Withdrawals", StateFilter("*"))
 async def admin_btn_pending_withdrawals(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -4064,12 +4064,12 @@ async def cb_admin_view_pending_withdrawals(call: CallbackQuery):
 
         kb = InlineKeyboardBuilder()
         kb.button(
-            text="💸 Pay", icon_custom_emoji_id="5444856076954520455", 
+            text="Pay", icon_custom_emoji_id="5444856076954520455", 
             callback_data=f"wp:{withdraw_id}", 
             style="success"
         )
         kb.button(
-            text="❌ Reject", icon_custom_emoji_id="5274099962655816924", 
+            text="Reject", icon_custom_emoji_id="5274099962655816924", 
             callback_data=f"wr:{withdraw_id}", 
             style="danger"
         )
@@ -4130,7 +4130,7 @@ async def process_chat_message_step(message: Message, state: FSMContext):
 
     await state.clear()
 
-@dp.message(F.text == "🗑 Unassign Tasks", StateFilter("*"))
+@dp.message(F.text == "Unassign Tasks", StateFilter("*"))
 async def admin_btn_unassign_tasks(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -4280,14 +4280,14 @@ async def process_unassign_user_id_step(message: Message, state: FSMContext):
 def get_dustbin_menu_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(text="🧹 Clear Dust", callback_data="dustbin_clear", style="danger")
-    kb.button(text="🗑 See Dustbin", icon_custom_emoji_id="5262529363710060188", callback_data="dustbin_view:1", style="primary")
+    kb.button(text="See Dustbin", icon_custom_emoji_id="5262529363710060188", callback_data="dustbin_view:1", style="primary")
     kb.adjust(2)
     return kb.as_markup()
 
 def get_dustbin_clear_confirm_keyboard():
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Yes, Clear It", icon_custom_emoji_id="6217663806110175239", callback_data="dustbin_clear_confirm", style="danger")
-    kb.button(text="❌ Cancel", icon_custom_emoji_id="5274099962655816924", callback_data="dustbin_clear_cancel", style="primary")
+    kb.button(text="Yes, Clear It", icon_custom_emoji_id="6217663806110175239", callback_data="dustbin_clear_confirm", style="danger")
+    kb.button(text="Cancel", icon_custom_emoji_id="5274099962655816924", callback_data="dustbin_clear_cancel", style="primary")
     kb.adjust(2)
     return kb.as_markup()
 
@@ -4306,7 +4306,7 @@ async def render_dustbin_menu(call: CallbackQuery):
         if "message is not modified" not in str(e):
             await call.message.answer(DUSTBIN_MENU_TEXT, parse_mode=ParseMode.HTML, reply_markup=get_dustbin_menu_keyboard())
 
-@dp.message(F.text == "🤖Dustbin", StateFilter("*"))
+@dp.message(F.text == "Dustbin", StateFilter("*"))
 async def admin_btn_dustbin(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -4814,7 +4814,7 @@ async def process_find_id_query_step(message: Message, state: FSMContext):
     kb = InlineKeyboardBuilder()
     if target_task_id:
         kb.button(
-            text="📜 ViewPast", icon_custom_emoji_id="5440410042773824003",
+            text="ViewPast", icon_custom_emoji_id="5440410042773824003",
             callback_data=f"view_past_task:{target_task_id}",
             style="success"
         )
@@ -4871,7 +4871,7 @@ async def cb_view_past_task(call: CallbackQuery):
 
     await call.message.answer(history_text, parse_mode=ParseMode.HTML)
 
-@dp.message(F.text == "➕ Add Balance", StateFilter("*"))
+@dp.message(F.text == "Add Balance", StateFilter("*"))
 async def admin_btn_add_balance(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -4994,7 +4994,7 @@ async def admin_btn_top_balances(message: Message, state: FSMContext):
 
     await message.answer(text, parse_mode=ParseMode.MARKDOWN, reply_markup=get_admin_menu_keyboard())
 
-@dp.message(F.text == "💳 Transactions", StateFilter("*"))
+@dp.message(F.text == "Transactions", StateFilter("*"))
 async def admin_btn_transactions(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -5024,7 +5024,7 @@ async def cb_admin_tx_page(call: CallbackQuery):
     except Exception:
         pass
 
-@dp.message(F.text == "📊 View Stats", StateFilter("*"))
+@dp.message(F.text == "View Stats", StateFilter("*"))
 async def admin_btn_view_stats(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -5056,7 +5056,7 @@ async def admin_btn_view_stats(message: Message, state: FSMContext):
     )
     await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
 
-@dp.message(F.text == "🚫 Ban User", StateFilter("*"))
+@dp.message(F.text == "Ban User", StateFilter("*"))
 async def admin_btn_ban_user(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -5087,7 +5087,7 @@ async def process_ban_user_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(F.text == "✅ Unban User", StateFilter("*"))
+@dp.message(F.text == "Unban User", StateFilter("*"))
 async def admin_btn_unban_user(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -5114,14 +5114,14 @@ async def process_unban_user_step(message: Message, state: FSMContext):
         await message.answer("❌ Invalid User ID.", reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
-@dp.message(F.text == "📢 Broadcast", StateFilter("*"))
+@dp.message(F.text == "Broadcast", StateFilter("*"))
 async def admin_btn_broadcast(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     await state.clear()
     kb = InlineKeyboardBuilder()
     kb.button(text="✉️ Message", callback_data="bc_type:message", style="primary")
-    kb.button(text="🎉 Giveaway", icon_custom_emoji_id="5461151367559141950", callback_data="bc_type:giveaway", style="success")
+    kb.button(text="Giveaway", icon_custom_emoji_id="5461151367559141950", callback_data="bc_type:giveaway", style="success")
     kb.adjust(2)
     await message.answer(
         "<tg-emoji emoji-id=\"5332724926216428039\">📢</tg-emoji> <b>Broadcast Center</b>\n\n"
@@ -5179,7 +5179,7 @@ async def process_broadcast_message(message: Message, state: FSMContext):
     kb.button(text="🕐 24 Hours", callback_data="bcdur:24")
     kb.button(text="🕑 48 Hours", callback_data="bcdur:48")
     kb.button(text="🕒 72 Hours", callback_data="bcdur:72")
-    kb.button(text="👥 All Users", icon_custom_emoji_id="5391292736647209211", callback_data="bcdur:all")
+    kb.button(text="All Users", icon_custom_emoji_id="5391292736647209211", callback_data="bcdur:all")
     kb.adjust(1)
 
     await message.answer(
@@ -5357,7 +5357,7 @@ async def process_giveaway_emoji_selection(call: CallbackQuery, state: FSMContex
     kb.button(text="🕐 24 Hours", callback_data="gwdur:24")
     kb.button(text="🕑 48 Hours", callback_data="gwdur:48")
     kb.button(text="🕒 72 Hours", callback_data="gwdur:72")
-    kb.button(text="👥 All Users", icon_custom_emoji_id="5391292736647209211", callback_data="gwdur:all")
+    kb.button(text="All Users", icon_custom_emoji_id="5391292736647209211", callback_data="gwdur:all")
     kb.adjust(1)
 
     try:
@@ -5577,7 +5577,7 @@ async def cb_giveaway_play(call: CallbackQuery):
         parse_mode=ParseMode.HTML
     )
 
-@dp.message(F.text == "⚙️ Change Values", StateFilter("*"))
+@dp.message(F.text == "Change Values", StateFilter("*"))
 async def admin_btn_change_values(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -5947,7 +5947,7 @@ async def process_change_ultra_token_step(message: Message, state: FSMContext):
     )
     await state.clear()
 
-@dp.message(F.text == "🗑 Remove Task", StateFilter("*"))
+@dp.message(F.text == "Remove Task", StateFilter("*"))
 async def admin_btn_remove_task(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -5973,7 +5973,7 @@ async def process_remove_task_step(message: Message, state: FSMContext):
     await state.clear()
 
 @dp.message(Command("mustjoin"), StateFilter("*"))
-@dp.message(F.text == "📢 Must Join Channel", StateFilter("*"))
+@dp.message(F.text == "Must Join Channel", StateFilter("*"))
 async def set_must_join_command(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
