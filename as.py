@@ -489,8 +489,8 @@ async def api_submit_task(request: web.Request):
         await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
 
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text='✅ Approve', callback_data=f'ta:{task_id}', style="success"),
-        InlineKeyboardButton(text='❌ Decline', callback_data=f'td:{task_id}', style="danger")
+        InlineKeyboardButton(text='Approve', icon_custom_emoji_id="6217663806110175239", callback_data=f'ta:{task_id}', style="success"),
+        InlineKeyboardButton(text='Decline', icon_custom_emoji_id="5274099962655816924", callback_data=f'td:{task_id}', style="danger")
     ]])
     try:
         await bot.send_message(
@@ -1357,7 +1357,7 @@ def get_referral_inline_keyboard(user_id: int):
         style="primary"
     )
     kb.button(
-        text="⬅️ Back",
+        text="Back", icon_custom_emoji_id="5875082500023258804",
         callback_data="menu_back"
     )
     kb.adjust(2, 1)
@@ -1365,13 +1365,14 @@ def get_referral_inline_keyboard(user_id: int):
 
 def get_settings_keyboard(notif_enabled: bool, currency: str):
     kb = InlineKeyboardBuilder()
-    notif_text = "🔔 Notifications: ON" if notif_enabled else "🔕 Notifications: OFF"
-    curr_text = f"💱 Currency: {currency} ({'$' if currency=='USD' else '₹'})"
-    
-    kb.button(text=notif_text, callback_data="toggle_notif", style="primary")
-    kb.button(text=curr_text, callback_data="toggle_currency", style="primary")
+    notif_text = "Notifications: ON" if notif_enabled else "Notifications: OFF"
+    curr_text = f"Currency: {currency} ({'$' if currency=='USD' else '₹'})"
+    notif_icon = "6217663806110175239" if notif_enabled else "5274099962655816924"
+
+    kb.button(text=notif_text, icon_custom_emoji_id=notif_icon, callback_data="toggle_notif", style="primary")
+    kb.button(text=curr_text, icon_custom_emoji_id="5197434882321567830", callback_data="toggle_currency", style="primary")
     kb.button(
-        text="⬅️ Back",
+        text="Back", icon_custom_emoji_id="5875082500023258804",
         callback_data="menu_back"
     )
     kb.adjust(1, 1, 1)
@@ -1569,15 +1570,15 @@ def get_unassign_inline_keyboard():
 
 def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool, ultra_set: bool = False):
     kb = InlineKeyboardBuilder()
-    upi_link_text = "🏦 Change UPI" if upi_set else "🏦 Link UPI"
-    usdt_link_text = "🪙 Change USDT" if usdt_set else "🪙 Link USDT BEP-20"
+    upi_link_text = "Change UPI" if upi_set else "Link UPI"
+    usdt_link_text = "Change USDT" if usdt_set else "Link USDT BEP-20"
 
-    kb.button(text=upi_link_text, callback_data="link_upi", style="primary")
-    kb.button(text=usdt_link_text, callback_data="link_usdt", style="primary")
+    kb.button(text=upi_link_text, icon_custom_emoji_id="6291696801636424911", callback_data="link_upi", style="primary")
+    kb.button(text=usdt_link_text, icon_custom_emoji_id="5197434882321567830", callback_data="link_usdt", style="primary")
     
     if ULTRA_STATUS:
-        ultra_link_text = "⚡️ Change Ultra" if ultra_set else "⚡️ Link Ultra Gateway"
-        kb.button(text=ultra_link_text, callback_data="link_ultra", style="primary")
+        ultra_link_text = "Change Ultra" if ultra_set else "Link Ultra Gateway"
+        kb.button(text=ultra_link_text, icon_custom_emoji_id="5195033767969839232", callback_data="link_ultra", style="primary")
 
     kb.button(
         text="Withdraw", icon_custom_emoji_id="5444856076954520455", 
@@ -1585,7 +1586,7 @@ def get_balance_inline_keyboard(upi_set: bool, usdt_set: bool, ultra_set: bool =
         style="success"
     )
     kb.button(
-        text="⬅️ Back",
+        text="Back", icon_custom_emoji_id="5875082500023258804",
         callback_data="menu_back"
     )
     if ULTRA_STATUS:
@@ -1601,7 +1602,7 @@ def get_withdraw_options_keyboard():
     if ULTRA_STATUS:
         kb.button(text=f"Withdraw via Ultra Gateway (0 Fees)", icon_custom_emoji_id="5195033767969839232", callback_data="withdraw_ultra", style="success")
     kb.button(
-        text="⬅️ Back",
+        text="Back", icon_custom_emoji_id="5875082500023258804",
         callback_data="menu_balance"
     )
     if ULTRA_STATUS:
@@ -1613,7 +1614,7 @@ def get_withdraw_options_keyboard():
 def get_back_inline_keyboard(callback_data: str = "menu_back"):
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="⬅️ Back",
+        text="Back", icon_custom_emoji_id="5875082500023258804",
         callback_data=callback_data
     )
     kb.adjust(1)
@@ -1639,7 +1640,7 @@ def get_task_action_keyboard():
 def get_support_cancel_keyboard():
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="⬅️ Back", 
+        text="Back", icon_custom_emoji_id="5875082500023258804",
         callback_data="menu_back"
     )
     kb.adjust(1)
@@ -3713,7 +3714,7 @@ async def process_add_task_step(message: Message, state: FSMContext):
             style="success"
         )
         kb.button(
-            text="⬅️ Back", 
+            text="Back", icon_custom_emoji_id="5875082500023258804",
             callback_data="cancel_add_duplicate_task", 
             style="danger"
         )
@@ -3936,8 +3937,8 @@ async def cb_admin_view_pending_tasks(call: CallbackQuery):
             password = DEFAULT_TASK_PASS
         
         kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text='✅ Approve', callback_data=f'ta:{task_id}', style="success"),
-            InlineKeyboardButton(text='❌ Decline', callback_data=f'td:{task_id}', style="danger")
+            InlineKeyboardButton(text='Approve', icon_custom_emoji_id="6217663806110175239", callback_data=f'ta:{task_id}', style="success"),
+            InlineKeyboardButton(text='Decline', icon_custom_emoji_id="5274099962655816924", callback_data=f'td:{task_id}', style="danger")
         ]])
         
         await call.message.answer(
@@ -6464,8 +6465,8 @@ async def handle_task_submission(message: Message, state: FSMContext):
         await conn.execute("UPDATE tasks SET status='pending_review' WHERE id=$1", task_id)
 
     admin_kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text='✅ Approve', callback_data=f'ta:{task_id}', style="success"),
-        InlineKeyboardButton(text='❌ Decline', callback_data=f'td:{task_id}', style="danger")
+        InlineKeyboardButton(text='Approve', icon_custom_emoji_id="6217663806110175239", callback_data=f'ta:{task_id}', style="success"),
+        InlineKeyboardButton(text='Decline', icon_custom_emoji_id="5274099962655816924", callback_data=f'td:{task_id}', style="danger")
     ]])
 
     admin_msg_text = (
