@@ -65,6 +65,7 @@ HTTP_SESSION = None  # shared aiohttp session (reused across requests for speed)
 BANNED_USERS_CACHE = set()
 SUPPORT_REQUESTS_CACHE = {}  # In-memory store: {user_id: {"username": str, "message": str}}
 MUST_JOIN_CHANNEL = None
+PAYOUT_CHANNEL = None        # Channel where UPI/USDT withdrawal requests are posted for owner/admin approval
 BOT_USERNAME = "GmailEarnexBot"
 BOT_STATUS = True           # True = ON, False = OFF
 BOT_OFF_MESSAGE = "<tg-emoji emoji-id=\"5420323339723881652\">⚠️</tg-emoji> Bot is Currently Off, Wait For Admin To On The Bot"   # Shown to users while bot is OFF; admin can customize it
@@ -111,7 +112,7 @@ MENU_BUTTONS = {
     "Add Task", "Tasks", "Available Tasks", "Pending Reviews", "Pending Withdrawals", "Chat", "Unassign Tasks", "Find ID", "Add Balance", 
     "Cut Balance", "Check Balance", "Top Balances", "Ban User", "Unban User",
     "Broadcast", "Change Values", "Remove Task", "Transactions", "View Stats",
-    "Must Join Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "Validator", "Transfer Admin",
+    "Must Join Channel", "Payout Channel", "🔴 Bot Status: OFF", "🟢 Bot Status: ON", "🟢 Ref Status: ON", "🔴 Ref Status: OFF", "Validator", "Transfer Admin",
     "🟢 Ultra Status: ON", "🔴 Ultra Status: OFF", "Manage Workers", "Dustbin", "Videos"
 }
 
@@ -830,6 +831,7 @@ class AdminState(StatesGroup):
     waiting_for_task_reject_reason = State()
     waiting_for_sell_reject_reason = State()
     waiting_for_channel_link = State()
+    waiting_for_payout_channel = State()
     waiting_for_add_balance = State()
     waiting_for_cut_balance = State()
     waiting_for_check_balance = State()
@@ -1036,7 +1038,7 @@ async def init_db():
         ''')
 
 async def load_settings_and_cache():
-    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, BOT_USERNAME, BOT_STATUS, BOT_OFF_MESSAGE, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
+    global BANNED_USERS_CACHE, MUST_JOIN_CHANNEL, PAYOUT_CHANNEL, BOT_USERNAME, BOT_STATUS, BOT_OFF_MESSAGE, REF_STATUS, ULTRA_STATUS, SINGLE_TASK_STATUS, SELL_GMAIL_STATUS, EMAILABLE_API_KEY, VALIDATOR_ENABLED, VALIDATOR_PROVIDER, ADMIN_ID
     global DEFAULT_TASK_RATE, GMAIL_SELL_RATE, MIN_WITHDRAWAL_AMT, DEFAULT_TASK_PASS, DEFAULT_TASK_PASS_STATUS, UPI_FEES, USDT_FEES, ULTRA_FEES, ULTRA_TOKEN, ULTRA_KEY
     global TASK_VIDEO_LINK, SELL_VIDEO_LINK, HOWTO_VIDEO_LINK
     
@@ -1046,6 +1048,14 @@ async def load_settings_and_cache():
         
         channel_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='must_join_channel'")
         MUST_JOIN_CHANNEL = channel_val if channel_val else None
+
+        payout_channel_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='payout_channel'")
+        if payout_channel_val and payout_channel_val != "off":
+            # Numeric channel IDs (private channels, e.g. -1001234567890) are stored as text -
+            # convert back to int so bot.send_message()/get_chat_member() receive the right type.
+            PAYOUT_CHANNEL = int(payout_channel_val) if payout_channel_val.lstrip('-').isdigit() else payout_channel_val
+        else:
+            PAYOUT_CHANNEL = None
 
         status_val = await conn.fetchval("SELECT value FROM bot_settings WHERE key='bot_status'")
         BOT_STATUS = (status_val != 'off')
@@ -1422,9 +1432,10 @@ def get_admin_menu_keyboard():
     kb.button(text="Manage Workers", icon_custom_emoji_id="5264713049637409446", style="primary")
     kb.button(text="Transfer Admin", icon_custom_emoji_id="5217822164362739968", style="danger")
 
+    kb.button(text="Payout Channel", icon_custom_emoji_id="5444856076954520455", style="primary")
     kb.button(text="Main Menu", icon_custom_emoji_id="5416041192905265756", style="primary")
     
-    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1)
+    kb.adjust(2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1)
     return kb.as_markup(resize_keyboard=True)
 
 def get_pending_reviews_inline_keyboard():
@@ -3052,14 +3063,16 @@ async def render_workers_list_text_and_kb():
     kb = InlineKeyboardBuilder()
 
     for idx, w in enumerate(workers, start=1):
-        # NOTE: inline button labels never parse HTML/entities (no parse_mode applies to
-        # button text), so custom-emoji <tg-emoji> tags must NOT be used here - only plain
-        # unicode emoji render correctly inside a button.
-        status_icon = "🟢" if w['is_active'] else "🔴"
-        sell_icon = "📨" if w['can_sell_gmail'] else "🚫"
+        # NOTE: inline button labels never parse HTML/entities - no parse_mode applies to
+        # button text, so a literal <tg-emoji> tag shows up as raw text (this was the bug).
+        # A button can only carry ONE premium custom emoji, via icon_custom_emoji_id, so
+        # we keep the premium sell-permission emoji there, and show Bot Access (on/off)
+        # via the button's color style instead of a second emoji tag.
         worker_display_name = w['name'] if w['name'] else f"Worker ({w['worker_id']})"
-        btn_label = f"#{idx} {worker_display_name} {status_icon}{sell_icon}"
-        kb.button(text=btn_label, callback_data=f"adm_work_view:{w['worker_id']}")
+        btn_label = f"#{idx} {worker_display_name}"
+        sell_icon_id = "5377548235709619284" if w['can_sell_gmail'] else "5240241223632954241"  # premium 📨 / 🚫
+        access_style = "success" if w['is_active'] else "danger"  # green = Bot Access ON, red = OFF
+        kb.button(text=btn_label, icon_custom_emoji_id=sell_icon_id, callback_data=f"adm_work_view:{w['worker_id']}", style=access_style)
 
     kb.adjust(1)
     return text, kb.as_markup()
@@ -6018,6 +6031,67 @@ async def process_must_join_channel_step(message: Message, state: FSMContext):
     await message.answer(msg, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
     await state.clear()
 
+@dp.message(Command("payoutchannel"), StateFilter("*"))
+@dp.message(F.text == "Payout Channel", StateFilter("*"))
+async def set_payout_channel_command(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(AdminState.waiting_for_payout_channel)
+    current = PAYOUT_CHANNEL if PAYOUT_CHANNEL else "Disabled"
+    await message.answer(
+        f"<tg-emoji emoji-id=\"5444856076954520455\">💸</tg-emoji> <b>Payout Channel Settings</b>\n\n"
+        f"Currently set to: <code>{current}</code>\n\n"
+        f"<tg-emoji emoji-id=\"5420323339723881652\">⚠️</tg-emoji> <b>The bot must be an admin of this channel</b> so it can post withdrawal requests and let you Pay/Reject from there.\n\n"
+        f"Send the channel username (e.g. <code>@MyPayoutChannel</code>), a link (e.g. <code>https://t.me/MyPayoutChannel</code>), or a private channel's numeric ID (e.g. <code>-1001234567890</code>).\n\n"
+        f"Only the bot owner and users who are <b>admins/owner of that channel</b> will be able to press Pay/Reject there.\n\n"
+        f"<i>Type <code>none</code> to stop mirroring withdrawal requests to a channel.</i>",
+        parse_mode=ParseMode.HTML
+    )
+
+@dp.message(AdminState.waiting_for_payout_channel, ~F.text.startswith("/"), ~F.text.in_(MENU_BUTTONS))
+async def process_payout_channel_step(message: Message, state: FSMContext):
+    await cleanup_last_menu(message, state)
+    global PAYOUT_CHANNEL
+    val = message.text.strip()
+
+    if val.lower() == "none":
+        PAYOUT_CHANNEL = None
+        db_val = "off"
+        msg = "<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> <b>Payout Channel disabled.</b> Withdrawal requests will no longer be mirrored to a channel."
+    else:
+        if val.lstrip('-').isdigit():
+            # Numeric channel ID (private channels use e.g. -1001234567890)
+            PAYOUT_CHANNEL = int(val)
+            db_val = val
+        else:
+            if "/" in val:
+                val = "@" + val.split("/")[-1].replace("@", "")
+            elif not val.startswith("@"):
+                val = "@" + val
+            PAYOUT_CHANNEL = val
+            db_val = val
+
+        # Sanity check: make sure the bot can actually see/post in this channel before saving.
+        try:
+            await bot.get_chat(PAYOUT_CHANNEL)
+        except Exception as e:
+            await message.answer(
+                f"<tg-emoji emoji-id=\"5274099962655816924\">❌</tg-emoji> <b>Couldn't access that channel:</b> <code>{e}</code>\n\n"
+                f"Make sure the bot has been added to the channel as an <b>admin</b>, then try again.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=get_admin_menu_keyboard()
+            )
+            await state.clear()
+            return
+
+        msg = f"<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> <b>Payout Channel updated to:</b> <code>{val}</code>\n\nNew UPI/USDT withdrawal requests will now also be posted there for approval."
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("INSERT INTO bot_settings (key, value) VALUES ('payout_channel', $1) ON CONFLICT (key) DO UPDATE SET value = $1", str(db_val))
+
+    await message.answer(msg, parse_mode=ParseMode.HTML, reply_markup=get_admin_menu_keyboard())
+    await state.clear()
+
 # ============================================
 # USER INLINE SUBMIT & CANCEL SYSTEM
 # ============================================
@@ -6065,6 +6139,170 @@ async def choose_withdraw_method_handler(call: CallbackQuery):
         await call.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=get_withdraw_options_keyboard())
     except Exception as e:
         print(f"Error choosing withdraw method: {e}")
+
+# ============================================
+# PAYOUT CHANNEL (owner/admin-only withdrawal review channel)
+# ============================================
+
+async def is_payout_channel_authorized(user_id: int) -> bool:
+    """Only the bot owner (ADMIN_ID) or a Telegram admin/owner of the payout channel
+    itself may approve/reject a withdrawal from inside that channel."""
+    if user_id == ADMIN_ID:
+        return True
+    if not PAYOUT_CHANNEL:
+        return False
+    try:
+        member = await bot.get_chat_member(chat_id=PAYOUT_CHANNEL, user_id=user_id)
+        return member.status in ('creator', 'administrator')
+    except Exception:
+        return False
+
+def get_payout_channel_keyboard(withdraw_id: int):
+    kb = InlineKeyboardBuilder()
+    kb.button(text='💸 Pay', callback_data=f'pcw_pay:{withdraw_id}', style="success")
+    kb.button(text='❌ Reject', callback_data=f'pcw_rej:{withdraw_id}', style="danger")
+    kb.adjust(2)
+    return kb.as_markup()
+
+async def post_to_payout_channel(text: str, withdraw_id: int):
+    """Mirrors a pending withdrawal request into the Payout Channel (if configured)
+    with its own Pay/Reject buttons, using the same premium-emoji formatting as the
+    owner's private admin notification."""
+    if not PAYOUT_CHANNEL:
+        return
+    try:
+        await bot.send_message(
+            PAYOUT_CHANNEL,
+            text,
+            reply_markup=get_payout_channel_keyboard(withdraw_id),
+            parse_mode=ParseMode.HTML
+        )
+    except Exception as e:
+        print(f"Error posting to payout channel: {e}")
+
+async def _mark_withdrawal_paid(withdrawal_id: int):
+    """Shared DB logic for marking a withdrawal as paid - used by both the private
+    admin-DM 'wp:' handler and the payout-channel 'pcw_pay:' handler, so both entry
+    points stay perfectly in sync and race-safe (status='pending' guard)."""
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            w_data = await conn.fetchrow(
+                "UPDATE withdrawals SET status='paid' WHERE id=$1 AND status='pending' RETURNING user_id, amount",
+                withdrawal_id
+            )
+            if not w_data:
+                return None
+            user_id = w_data['user_id']
+            payout_amount = w_data['amount']
+            await conn.execute(
+                "UPDATE transactions SET type='withdrawal', note=$1 WHERE user_id=$2 AND note LIKE $3",
+                "Withdrawal paid", user_id, f"%Withdrawal #{withdrawal_id}%"
+            )
+    invalidate_user_cache(user_id)
+    return {'user_id': user_id, 'payout_amount': payout_amount}
+
+async def _mark_withdrawal_rejected(withdrawal_id: int):
+    """Shared DB logic for rejecting + refunding a withdrawal - used by both the
+    private admin-DM 'wr:' handler and the payout-channel 'pcw_rej:' handler."""
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            w_data = await conn.fetchrow(
+                "UPDATE withdrawals SET status='rejected' WHERE id=$1 AND status='pending' RETURNING user_id, amount, method",
+                withdrawal_id
+            )
+            if not w_data:
+                return None
+            user_id = w_data['user_id']
+            payout_amount = w_data['amount']
+            method = (w_data['method'] or 'UPI').lower()
+
+            fee = UPI_FEES if 'upi' in method else (USDT_FEES if 'usdt' in method else ULTRA_FEES)
+            refund_total = payout_amount + fee
+
+            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", refund_total, user_id)
+            await conn.execute(
+                "UPDATE transactions SET type='withdrawal_rejected', note = note || ' [REJECTED]' WHERE user_id=$1 AND note LIKE $2",
+                user_id, f"%Withdrawal #{withdrawal_id}%"
+            )
+            await conn.execute(
+                "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
+                user_id, "refund", refund_total, f"Refund for rejected withdrawal #{withdrawal_id}"
+            )
+    invalidate_user_cache(user_id)
+    return {'user_id': user_id, 'refund_total': refund_total}
+
+@dp.callback_query(F.data.startswith("pcw_pay:"))
+async def payout_channel_approve(call: CallbackQuery):
+    if not await is_payout_channel_authorized(call.from_user.id):
+        await call.answer("❌ Only the owner or an admin of this channel can process withdrawals.", show_alert=True)
+        return
+
+    withdrawal_id = int(call.data.split(":")[1])
+    result = await _mark_withdrawal_paid(withdrawal_id)
+    if not result:
+        await call.answer("⚠️ This request is already processed!", show_alert=True)
+        return
+
+    await call.answer("✅ Marked as paid.")
+    user_id = result['user_id']
+    payout_amount = result['payout_amount']
+    processed_by = f"@{call.from_user.username}" if call.from_user.username else call.from_user.full_name
+    processed_time = datetime.utcnow().strftime("%d %b %Y, %H:%M UTC")
+
+    await edit_admin_message(
+        call,
+        f"<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> <b>PAID</b>\n"
+        f"<tg-emoji emoji-id=\"5870458774455587120\">👤</tg-emoji> <b>Processed by:</b> {processed_by}\n"
+        f"<tg-emoji emoji-id=\"5382194935057372936\">⏳</tg-emoji> <b>Time:</b> {processed_time}"
+    )
+
+    async def notify_user():
+        user_data = await get_user_data(user_id)
+        formatted_amt = format_currency(payout_amount, user_data['currency'])
+        await send_user_notification(
+            user_id,
+            f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Your withdrawal request of {formatted_amt} has been approved and paid!",
+            parse_mode=ParseMode.HTML
+        )
+
+    asyncio.create_task(notify_user())
+
+@dp.callback_query(F.data.startswith("pcw_rej:"))
+async def payout_channel_reject(call: CallbackQuery):
+    if not await is_payout_channel_authorized(call.from_user.id):
+        await call.answer("❌ Only the owner or an admin of this channel can process withdrawals.", show_alert=True)
+        return
+
+    withdrawal_id = int(call.data.split(":")[1])
+    result = await _mark_withdrawal_rejected(withdrawal_id)
+    if not result:
+        await call.answer("⚠️ This request is already processed!", show_alert=True)
+        return
+
+    await call.answer("⚠️ Rejected & refunded.")
+    user_id = result['user_id']
+    refund_total = result['refund_total']
+    processed_by = f"@{call.from_user.username}" if call.from_user.username else call.from_user.full_name
+    processed_time = datetime.utcnow().strftime("%d %b %Y, %H:%M UTC")
+
+    await edit_admin_message(
+        call,
+        f"<tg-emoji emoji-id=\"5420323339723881652\">⚠️</tg-emoji> <b>REJECTED (Balance Refunded)</b>\n"
+        f"<tg-emoji emoji-id=\"5870458774455587120\">👤</tg-emoji> <b>Processed by:</b> {processed_by}\n"
+        f"<tg-emoji emoji-id=\"5382194935057372936\">⏳</tg-emoji> <b>Time:</b> {processed_time}"
+    )
+
+    async def notify_user_refund():
+        user_data = await get_user_data(user_id)
+        formatted_amt = format_currency(refund_total, user_data['currency'])
+        await send_user_notification(
+            user_id,
+            f'<tg-emoji emoji-id=\"5420323339723881652\">⚠️</tg-emoji> Your withdrawal request #{withdrawal_id} was rejected.\n'
+            f'<tg-emoji emoji-id=\"5417924076503062111\">💰</tg-emoji> <b>{formatted_amt}</b> has been refunded back to your balance.',
+            parse_mode=ParseMode.HTML
+        )
+
+    asyncio.create_task(notify_user_refund())
 
 @dp.callback_query(F.data == "withdraw_upi")
 async def inline_withdraw_upi_handler(call: CallbackQuery):
@@ -6140,16 +6378,21 @@ async def inline_withdraw_upi_handler(call: CallbackQuery):
     )
     kb.adjust(2)
     
-    await bot.send_message(
-        ADMIN_ID,
+    withdraw_request_text = (
         f'<tg-emoji emoji-id=\"5417924076503062111\">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id} (UPI)</b>\n\n'
         f'<tg-emoji emoji-id=\"5870458774455587120\">👤</tg-emoji> @{call.from_user.username}\n'
         f'🆔 <code>{user_id}</code>\n'
         f'<tg-emoji emoji-id=\"5417924076503062111\">💰</tg-emoji> Net Payout: ₹{payout_amount:.2f} (Fee Charged: ₹{UPI_FEES:.2f})\n'
-        f'<tg-emoji emoji-id=\"6291696801636424911\">🏦</tg-emoji> UPI: <code>{upi}</code>',
+        f'<tg-emoji emoji-id=\"6291696801636424911\">🏦</tg-emoji> UPI: <code>{upi}</code>'
+    )
+
+    await bot.send_message(
+        ADMIN_ID,
+        withdraw_request_text,
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
+    asyncio.create_task(post_to_payout_channel(withdraw_request_text, withdraw_id))
 
     payout_display = format_currency(payout_amount, curr)
     fee_display = format_currency(UPI_FEES, curr)
@@ -6237,16 +6480,21 @@ async def inline_withdraw_usdt_handler(call: CallbackQuery):
     kb.adjust(2)
     
     usdt_amount = payout_amount / USD_TO_INR
-    await bot.send_message(
-        ADMIN_ID,
+    withdraw_request_text = (
         f'<tg-emoji emoji-id=\"5417924076503062111\">💰</tg-emoji> <b>WITHDRAWAL REQUEST #{withdraw_id} (USDT BEP-20)</b>\n\n'
         f'<tg-emoji emoji-id=\"5870458774455587120\">👤</tg-emoji> @{call.from_user.username}\n'
         f'🆔 <code>{user_id}</code>\n'
         f'<tg-emoji emoji-id=\"5417924076503062111\">💰</tg-emoji> Net Payout: ₹{payout_amount:.2f} (~${usdt_amount:.2f} USDT) (Fee Charged: ₹{USDT_FEES:.2f})\n'
-        f'<tg-emoji emoji-id=\"5197434882321567830\">🪙</tg-emoji> USDT BEP-20: <code>{usdt}</code>',
+        f'<tg-emoji emoji-id=\"5197434882321567830\">🪙</tg-emoji> USDT BEP-20: <code>{usdt}</code>'
+    )
+
+    await bot.send_message(
+        ADMIN_ID,
+        withdraw_request_text,
         reply_markup=kb.as_markup(),
         parse_mode=ParseMode.HTML
     )
+    asyncio.create_task(post_to_payout_channel(withdraw_request_text, withdraw_id))
 
     payout_display = format_currency(payout_amount, curr)
     fee_display = format_currency(USDT_FEES, curr)
@@ -6582,7 +6830,7 @@ async def approve_sell_unified(call: CallbackQuery):
     async def notify_user():
         user_data = await get_user_data(user_id)
         formatted_amt = format_currency(amount, user_data['currency'])
-        await send_user_notification(user_id, f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Your Gmail sell request #{sell_id} was approved!\n+{formatted_amt} added to your balance.")
+        await send_user_notification(user_id, f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Your Gmail sell request #{sell_id} was approved!\n+{formatted_amt} added to your balance.", parse_mode=ParseMode.HTML)
 
     asyncio.create_task(notify_user())
 
@@ -6708,7 +6956,7 @@ async def approve_task(call: CallbackQuery):
     async def notify_user():
         user_data = await get_user_data(user_id)
         formatted_reward = format_currency(reward, user_data['currency'])
-        await send_user_notification(user_id, f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Task #{task_id} approved!\n+{formatted_reward} added to your balance.")
+        await send_user_notification(user_id, f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Task #{task_id} approved!\n+{formatted_reward} added to your balance.", parse_mode=ParseMode.HTML)
 
     asyncio.create_task(notify_user())
 
@@ -6779,73 +7027,56 @@ async def process_task_reject_reason(message: Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("wp:"))
 async def pay_withdraw(call: CallbackQuery):
     withdrawal_id = int(call.data.split(":")[1])
+    result = await _mark_withdrawal_paid(withdrawal_id)
+    if not result:
+        await call.answer("⚠️ This request is already processed!", show_alert=True)
+        return
 
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            w_data = await conn.fetchrow(
-                "UPDATE withdrawals SET status='paid' WHERE id=$1 AND status='pending' RETURNING user_id, amount",
-                withdrawal_id
-            )
-            if not w_data:
-                await call.answer("⚠️ This request is already processed!", show_alert=True)
-                return
+    await call.answer()
+    user_id = result['user_id']
+    payout_amount = result['payout_amount']
+    processed_by = f"@{call.from_user.username}" if call.from_user.username else call.from_user.full_name
+    processed_time = datetime.utcnow().strftime("%d %b %Y, %H:%M UTC")
 
-            await call.answer()
-            user_id = w_data['user_id']
-            payout_amount = w_data['amount']
-
-            await conn.execute(
-                "UPDATE transactions SET type='withdrawal', note=$1 WHERE user_id=$2 AND note LIKE $3",
-                "Withdrawal paid", user_id, f"%Withdrawal #{withdrawal_id}%"
-            )
-
-    invalidate_user_cache(user_id)
-    await edit_admin_message(call, '<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> Withdrawal Paid')
+    await edit_admin_message(
+        call,
+        f"<tg-emoji emoji-id=\"6217663806110175239\">✅</tg-emoji> <b>Withdrawal Paid</b>\n"
+        f"<tg-emoji emoji-id=\"5870458774455587120\">👤</tg-emoji> <b>Processed by:</b> {processed_by}\n"
+        f"<tg-emoji emoji-id=\"5382194935057372936\">⏳</tg-emoji> <b>Time:</b> {processed_time}"
+    )
 
     async def notify_user():
         user_data = await get_user_data(user_id)
         formatted_amt = format_currency(payout_amount, user_data['currency'])
-        await send_user_notification(user_id, f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Your withdrawal request of {formatted_amt} has been approved and paid!")
+        await send_user_notification(
+            user_id,
+            f"<tg-emoji emoji-id=\"5461151367559141950\">🎉</tg-emoji> Your withdrawal request of {formatted_amt} has been approved and paid!",
+            parse_mode=ParseMode.HTML
+        )
 
     asyncio.create_task(notify_user())
 
 @dp.callback_query(F.data.startswith("wr:"))
 async def reject_withdraw(call: CallbackQuery):
     withdrawal_id = int(call.data.split(":")[1])
-    
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            w_data = await conn.fetchrow(
-                "UPDATE withdrawals SET status='rejected' WHERE id=$1 AND status='pending' RETURNING user_id, amount, method",
-                withdrawal_id
-            )
-            if not w_data:
-                await call.answer("⚠️ This request is already processed!", show_alert=True)
-                return
+    result = await _mark_withdrawal_rejected(withdrawal_id)
+    if not result:
+        await call.answer("⚠️ This request is already processed!", show_alert=True)
+        return
 
-            await call.answer()
-            user_id = w_data['user_id']
-            payout_amount = w_data['amount']
-            method = (w_data['method'] or 'UPI').lower()
+    await call.answer()
+    user_id = result['user_id']
+    refund_total = result['refund_total']
+    processed_by = f"@{call.from_user.username}" if call.from_user.username else call.from_user.full_name
+    processed_time = datetime.utcnow().strftime("%d %b %Y, %H:%M UTC")
 
-            fee = UPI_FEES if 'upi' in method else (USDT_FEES if 'usdt' in method else ULTRA_FEES)
-            refund_total = payout_amount + fee
+    await edit_admin_message(
+        call,
+        f"<tg-emoji emoji-id=\"5420323339723881652\">⚠️</tg-emoji> <b>Withdrawal Rejected (Balance Refunded)</b>\n"
+        f"<tg-emoji emoji-id=\"5870458774455587120\">👤</tg-emoji> <b>Processed by:</b> {processed_by}\n"
+        f"<tg-emoji emoji-id=\"5382194935057372936\">⏳</tg-emoji> <b>Time:</b> {processed_time}"
+    )
 
-            await conn.execute("UPDATE users SET balance = balance + $1 WHERE user_id=$2", refund_total, user_id)
-            # Keep the original ledger entry (relabelled) instead of deleting it, so the
-            # transaction history still shows the withdrawal that triggered this refund.
-            await conn.execute(
-                "UPDATE transactions SET type='withdrawal_rejected', note = note || ' [REJECTED]' WHERE user_id=$1 AND note LIKE $2",
-                user_id, f"%Withdrawal #{withdrawal_id}%"
-            )
-            await conn.execute(
-                "INSERT INTO transactions (user_id, type, amount, note) VALUES ($1, $2, $3, $4)",
-                user_id, "refund", refund_total, f"Refund for rejected withdrawal #{withdrawal_id}"
-            )
-
-    invalidate_user_cache(user_id)
-    await edit_admin_message(call, '<tg-emoji emoji-id=\"5420323339723881652\">⚠️</tg-emoji> Withdrawal Rejected (Balance Refunded)')
-    
     async def notify_user_refund():
         user_data = await get_user_data(user_id)
         formatted_amt = format_currency(refund_total, user_data['currency'])
